@@ -1,0 +1,6 @@
+@bidServiceAPI_HostAddress = http://localhost:5187
+
+GET {{bidServiceAPI_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###

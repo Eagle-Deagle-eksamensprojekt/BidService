@@ -1,0 +1,28 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "bidServiceAPI", "bidServiceAPI\bidServiceAPI.csproj", "{5D668083-4AA7-45D7-99D7-68A9C81B953B}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "bidServiceAPI.Test", "bidServiceAPI.Test\bidServiceAPI.Test.csproj", "{6E0D9785-EBE4-4700-85CC-23E7A5A98CDE}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{5D668083-4AA7-45D7-99D7-68A9C81B953B}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{5D668083-4AA7-45D7-99D7-68A9C81B953B}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{5D668083-4AA7-45D7-99D7-68A9C81B953B}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{5D668083-4AA7-45D7-99D7-68A9C81B953B}.Release|Any CPU.Build.0 = Release|Any CPU
+		{6E0D9785-EBE4-4700-85CC-23E7A5A98CDE}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{6E0D9785-EBE4-4700-85CC-23E7A5A98CDE}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{6E0D9785-EBE4-4700-85CC-23E7A5A98CDE}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{6E0D9785-EBE4-4700-85CC-23E7A5A98CDE}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+EndGlobal
