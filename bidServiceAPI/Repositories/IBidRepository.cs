@@ -7,18 +7,18 @@ namespace BidService.Repositories
     public interface IBidRepository
     {
         // Henter alle bud
-        Task<IEnumerable<Bid>> GetAllBidsAsync();
+        Task<IEnumerable<Bid>> GetAllBids();
 
         // Henter et bud baseret på ID
-        Task<Bid> GetBidByIdAsync(string id);
+        Task<Bid> GetBidById(string id);
 
         // Opretter et nyt bud
-        Task<Bid> CreateBidAsync(Bid newBid);
+        Task<Bid> CreateBid(Bid newBid);
 
         // Opdaterer et eksisterende bud
-        Task<bool> UpdateBidAsync(string id, Bid updatedBid);
+        Task<bool> UpdateBid(string id, Bid updatedBid);
 
         // Sletter et bud baseret på ID
-        Task<bool> DeleteBidAsync(string id);
+        Task<bool> DeleteBid(string id);
     }
 }
