@@ -16,7 +16,7 @@ namespace BidModel
         /// The amount of the bid
         /// </summary>
         [JsonPropertyName("Amount")]
-        public double Amount { get; set; }
+        public decimal Amount { get; set; }
 
         /// <summary>
         /// The time when the bid was placed
