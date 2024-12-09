@@ -1,4 +1,4 @@
-namespace BidModel
+namespace BidServiceAPI.Models;
 {
     using System;
     using System.Collections.Generic;

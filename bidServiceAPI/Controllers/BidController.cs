@@ -2,8 +2,8 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 using System;
 using System.Threading.Tasks;
-using BidModel;
-using BidService.Repositories;
+using BidServiceAPI.Models;
+using System.Text.Json;
 
 namespace BidService.Controllers
 {
@@ -11,29 +11,17 @@ namespace BidService.Controllers
     [Route("api/[controller]")]
     public class BidController : ControllerBase
     {
-        private readonly IBidRepository _bidRepository;
         private readonly ILogger<BidController> _logger;
 
-        public BidController(ILogger<BidController> logger, IBidRepository bidRepository)
+        public BidController(ILogger<BidController> logger)
         {
             _logger = logger;
-            _bidRepository = bidRepository;
         }
 
-        [HttpGet]
-        public async Task<IActionResult> GetAllBids()
-        {
-            try
-            {
-                // Async call to get all bids
-                var bids = await _bidRepository.GetAllBids();
-                return Ok(bids);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "An error occurred while getting all bids.");
-                return StatusCode(500, "Internal server error.");
-            }
+        // GET all bids on item {itemId}
+        [HttpGet("{itemId}")]
+        public async Task<IActionResult> GetAllBidsOnItem(string ItemId)
+        { return null;
         }
 
         [HttpPost]
@@ -97,5 +85,73 @@ namespace BidService.Controllers
                 return StatusCode(500, "Internal server error.");
             }
         }
+
+
+        // Til tjek om items er auctionable
+        // Get auctionable items from the item service, should be a list
+         private async Task<Item?> GetAuctionableItems()
+        {
+            // Tjek om brugeren eksisterer
+            var existsUrl = $"{_config["ItemServiceEndpoint"]}/auctionable";
+            
+            
+            var client = _httpClientFactory.CreateClient();
+            HttpResponseMessage response;
+
+            try
+            {
+                client.DefaultRequestHeaders.Add("Accept", "application/json");
+                response = await client.GetAsync(existsUrl);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, ex.Message);
+                return null;
+            }
+
+            if (response.IsSuccessStatusCode)
+            {
+                string responseContent = await response.Content.ReadAsStringAsync();
+                _logger.LogInformation("Response content: {ResponseContent}", responseContent);
+
+                try
+                {
+                    // Forsøg at deserialisere til User
+                    var item = JsonSerializer.Deserialize<Item>(responseContent);
+                    if (item == null)
+                    {
+                        _logger.LogInformation("No items Found.");
+                        return null;
+                    }
+
+                    _logger.LogInformation("Item data successfully deserialized.");
+                    return item;
+                }
+                catch (JsonException ex)
+                {
+                    _logger.LogError(ex, "Failed to deserialize Item data.");
+                    return null;
+                }
+            }
+            _logger.LogWarning("Failed to check if user exists.");
+            return null;
+        }
+
+
+        [HttpGet("items")]
+        public async Task<IActionResult> GetItems()
+        {
+            var items = await GetAuctionableItems();
+            if (items == null)
+            {
+                return Ok(null); // Returnerer null, hvis ingen items findes
+            }
+
+            return Ok(items); // Returnerer 200 OK med items
+        }
+
+
+    }
+}
     }
 }
