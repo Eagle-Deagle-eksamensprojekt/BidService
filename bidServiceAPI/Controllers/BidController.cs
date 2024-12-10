@@ -56,12 +56,6 @@ namespace BidService.Controllers
             return Ok(newBid); // Returner det nye bud
         }
 
-
-
-
-       
-
-
         // Til tjek om item er auctionable returnerer null hvis item ikke er auctionable
         // Get auctionable items from the item service
         private async Task<bool> IsItemAuctionable(string itemId)
@@ -138,20 +132,17 @@ namespace BidService.Controllers
                 };
 
                 // Create connection
-                using var connection = factory.CreateConnection();
+                using var connection = _connectionFactory.CreateConnection();
                 using var channel = connection.CreateModel();
 
                 // Queue name based on AuctionId
-                // Denne auctionId skal findes fra cash værdi fra isItemAuctionable
-                // Metoden er ikke lavet ordenligt endnu, så derfor er der en dummy værdi
-                //var auctionId = await GetAuctionIdForItem(bid.ItemId);
-                var auctionId = "AuctionId"; // Dummy value
-                if (auctionId == null)
+                var itemId = bid.ItemId;
+                if (itemId == null)
                 {
-                    _logger.LogError("Failed to get AuctionId for ItemId {ItemId}.", bid.ItemId);
+                    _logger.LogError("Failed to get ItemId from bid.");
                     return false;
                 }
-                var queueName = $"{auctionId}Queue";
+                var queueName = $"{itemId}Queue";
 
                 // Declare the queue (only necessary the first time)
                 channel.QueueDeclare(
