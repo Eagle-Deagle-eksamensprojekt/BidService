@@ -4,3 +4,4 @@ export DatabaseName=BidDB
 export CollectionName=bids
 export Loki=http://localhost:3100
 export AuctionServiceEndpoint=http://localhost:5256/auction
+export RABBITMQ_HOST=

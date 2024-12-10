@@ -12,7 +12,7 @@
     <PackageReference Include="NLog" Version="5.3.4" />
     <PackageReference Include="Nlog.Targets.Loki" Version="2.2.0" />
     <PackageReference Include="NLog.Web.AspNetCore" Version="5.3.15" />
-    <PackageReference Include="RabbitMQ.Client" Version="7.0.0" />
+    <PackageReference Include="RabbitMQ.Client" Version="6.4.0" />
     <PackageReference Include="Swashbuckle.AspNetCore" Version="6.4.0" />
         <None Include="NLog.config">
 <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
