@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using BidServiceAPI.Models;
 using System.Text.Json;
 using RabbitMQ.Client;
+using System.Text;
 
 namespace BidService.Controllers
 {
@@ -14,59 +15,46 @@ namespace BidService.Controllers
     {
         private readonly ILogger<BidController> _logger;
         private readonly IHttpClientFactory _httpClientFactory;
+        private readonly IConnectionFactory _connectionFactory;
         private readonly IConfiguration _config;
-        public BidController(ILogger<BidController> logger, IConfiguration config, IHttpClientFactory httpClientFactory)
+        public BidController(ILogger<BidController> logger, IConfiguration config, IHttpClientFactory httpClientFactory, IConnectionFactory connectionFactory)
         {
             _logger = logger;
             _config = config;
             _httpClientFactory = httpClientFactory;
-        }
+            _connectionFactory = connectionFactory;
+        }/*
+        {
+            _logger = logger;
+            _config = config;
+            _httpClientFactory = httpClientFactory;
+        }*/
 
         // POST place a bid on an item
         [HttpPost]
         public async Task<IActionResult> PlaceBid([FromBody] Bid newBid)
-        { return null!;
-            /*
-            // Hvis buddet er null, returner en fejl
-            if (newBid == null)
+        {
+            _logger.LogInformation("Placing bid on item {ItemId} for {Amount:C}.", newBid.ItemId, newBid.Amount);
+
+            // Tjek om item er auctionable
+            var auctionable = await IsItemAuctionable(newBid.ItemId);
+            if (!auctionable)
             {
-                return BadRequest("Bid cannot be null.");
+                _logger.LogWarning("Item {ItemId} is not auctionable.", newBid.ItemId);
+                return BadRequest("Item is not auctionable.");
             }
 
-            try
+            // Publish bid to RabbitMQ
+            var published = await PublishToRabbitMQ(newBid);
+            if (!published)
             {
-                // Opret et unikt ID og timestamp for buddet
-                newBid.Id = Guid.NewGuid().ToString();
-                newBid.BidTime = DateTime.UtcNow;
-
-                // Hent det nyeste bud for den vare, som der bydes på
-                var latestBid = await _bidRepository.GetLatestBidForItem(newBid.ItemId);
-
-                // Sæt minimumsbid til det sidste bud + 10, eller 100 hvis der ikke er noget bud
-                decimal minimumAmount = latestBid?.Amount + 10.0m ?? 100.0m;
-
-                // Hvis buddet er mindre end minimumsbeløbet, returner fejl
-                if (newBid.Amount < minimumAmount)
-                {
-                    return BadRequest($"Bid amount must be at least {minimumAmount:C}.");
-                }
-
-                // Opret det nye bud
-                var createdBid = await _bidRepository.CreateBid(newBid);
-                return CreatedAtAction(nameof(GetBidById), new { id = createdBid.Id }, createdBid);
+                _logger.LogError("Failed to publish bid for {ItemId} to RabbitMQ.", newBid.ItemId);
+                return StatusCode(500, "Failed to publish bid.");
             }
-            catch (Exception ex)
-            {
-                // Hvis der er en fejl, log den og returner en serverfejl
-                _logger.LogError(ex, "An error occurred while placing a bid.");
-                return StatusCode(500, "Internal server error.");
-            }*/
+
+            _logger.LogInformation("Bid for {ItemId} published successfully to RabbitMQ.", newBid.ItemId);
+            return Ok(newBid); // Returner det nye bud
         }
-
-
-
-       
-
 
         // Til tjek om item er auctionable returnerer null hvis item ikke er auctionable
         // Get auctionable items from the item service
@@ -130,19 +118,63 @@ namespace BidService.Controllers
         // I metoden skal ovenstående metode kaldes for at tjekke om item er auctionable
         // Dertil skal der også valideres om det nye bud er højere end det nuværende højeste bud
 
-
-/*
-        [HttpGet("items")]
-        public async Task<IActionResult> GetItems()
+        private async Task<bool> PublishToRabbitMQ(Bid bid)
         {
-            var items = await IsItemAuctionable("items");
-            if (items == null)
-            {
-                return Ok(null); // Returnerer null, hvis ingen items findes
-            }
+            var rabbitHost = $"{_config["RABBITMQ_HOST"]}" ?? "localhost"; // Default til localhost
 
-            return Ok(items); // Returnerer 200 OK med items
-        }*/
+            try
+            {
+                // RabbitMQ connection factory
+                var factory = new ConnectionFactory
+                {
+                    HostName = rabbitHost,
+                    DispatchConsumersAsync = true // Hvis du vil understøtte async consumers
+                };
+
+                // Create connection
+                using var connection = _connectionFactory.CreateConnection();
+                using var channel = connection.CreateModel();
+
+                // Queue name based on AuctionId
+                var itemId = bid.ItemId;
+                if (itemId == null)
+                {
+                    _logger.LogError("Failed to get ItemId from bid.");
+                    return false;
+                }
+                var queueName = $"{itemId}Queue";
+
+                // Declare the queue (only necessary the first time)
+                channel.QueueDeclare(
+                    queue: queueName,
+                    durable: false,
+                    exclusive: false,
+                    autoDelete: false,
+                    arguments: null
+                );
+
+                // Serialize bid object to JSON
+                var message = JsonSerializer.Serialize(bid);
+                var body = Encoding.UTF8.GetBytes(message);
+
+                // Publish the message to RabbitMQ
+                channel.BasicPublish(
+                    exchange: "",
+                    routingKey: queueName,
+                    basicProperties: null,
+                    body: body
+                );
+
+                _logger.LogInformation("Published bid {BidId} to RabbitMQ queue {QueueName}.", bid.Id, queueName);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to publish bid {BidId} to RabbitMQ.", bid.Id);
+                return false;
+            }
+        }
+
 
 
     }
