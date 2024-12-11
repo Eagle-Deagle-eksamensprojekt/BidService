@@ -136,7 +136,7 @@ namespace BidService.Controllers
                 using var channel = connection.CreateModel();
 
                 // Queue name based on AuctionId
-                var itemId = bid.ItemId;
+                var itemId = _config["ITEM_ID"] ?? bid.ItemId; // Default til bid.ItemId
                 if (itemId == null)
                 {
                     _logger.LogError("Failed to get ItemId from bid.");
