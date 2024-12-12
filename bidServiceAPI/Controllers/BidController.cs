@@ -4,97 +4,143 @@ using System;
 using System.Threading.Tasks;
 using BidServiceAPI.Models;
 using System.Text.Json;
+using RabbitMQ.Client;
+using System.Text;
+using System.Diagnostics;
+using Microsoft.Extensions.Caching.Memory;
+
+
 
 namespace BidService.Controllers
 {
     [ApiController]
-    [Route("api/[controller]")]
+    [Route("[controller]")]
     public class BidController : ControllerBase
     {
         private readonly ILogger<BidController> _logger;
+        private readonly IHttpClientFactory _httpClientFactory;
+        private readonly IConnectionFactory _connectionFactory;
+        private readonly IConfiguration _config;
 
-        public BidController(ILogger<BidController> logger)
+        private readonly RabbitMQListener _rabbitMQListener;
+        private readonly RabbitMQPublisher _rabbitMQPublisher;
+        public BidController(ILogger<BidController> logger, IConfiguration config, IHttpClientFactory httpClientFactory, IConnectionFactory connectionFactory, RabbitMQListener rabbitMQListener, RabbitMQPublisher rabbitMQPublisher)
+
+        private readonly IMemoryCache _memoryCache;
+        public BidController(ILogger<BidController> logger, IConfiguration config, IHttpClientFactory httpClientFactory, IConnectionFactory connectionFactory, IMemoryCache memoryCache)
+
         {
             _logger = logger;
+            _config = config;
+            _httpClientFactory = httpClientFactory;
+            _connectionFactory = connectionFactory;
+
+            _rabbitMQListener = rabbitMQListener;
+            _rabbitMQPublisher = rabbitMQPublisher;
         }
 
-        // GET all bids on item {itemId}
-        [HttpGet("{itemId}")]
-        public async Task<IActionResult> GetAllBidsOnItem(string ItemId)
-        { return null;
+        /// <summary>
+        /// Hent version af Service
+        /// </summary>
+        [HttpGet("version")]
+        public async Task<Dictionary<string,string>> GetVersion()
+
+            _memoryCache = memoryCache;
+        }/*
+
+        {
+            var properties = new Dictionary<string, string>();
+            var assembly = typeof(Program).Assembly;
+
+            properties.Add("service", "OrderService");
+            var ver = FileVersionInfo.GetVersionInfo(
+                typeof(Program).Assembly.Location).ProductVersion ?? "N/A";
+            properties.Add("version", ver);
+            
+            var hostName = System.Net.Dns.GetHostName();
+            var ips = await System.Net.Dns.GetHostAddressesAsync(hostName);
+            var ipa = ips.First().MapToIPv4().ToString() ?? "N/A";
+            properties.Add("ip-address", ipa);
+            
+            return properties;
         }
 
         [HttpPost]
         public async Task<IActionResult> PlaceBid([FromBody] Bid newBid)
         {
-            // Hvis buddet er null, returner en fejl
-            if (newBid == null)
-            {
-                return BadRequest("Bid cannot be null.");
-            }
+            _logger.LogInformation("Placing bid on item {ItemId} for {Amount:C}.", newBid.ItemId, newBid.Amount);
 
             try
             {
-                // Opret et unikt ID og timestamp for buddet
-                newBid.Id = Guid.NewGuid().ToString();
-                newBid.BidTime = DateTime.UtcNow;
-
-                // Hent det nyeste bud for den vare, som der bydes på
-                var latestBid = await _bidRepository.GetLatestBidForItem(newBid.ItemId);
-
-                // Sæt minimumsbid til det sidste bud + 10, eller 100 hvis der ikke er noget bud
-                decimal minimumAmount = latestBid?.Amount + 10.0m ?? 100.0m;
-
-                // Hvis buddet er mindre end minimumsbeløbet, returner fejl
-                if (newBid.Amount < minimumAmount)
+                // Tjek om item er auctionable
+                var auctionDetails = await IsItemAuctionable(newBid.ItemId);
+                if (auctionDetails == null)
                 {
-                    return BadRequest($"Bid amount must be at least {minimumAmount:C}.");
+                    _logger.LogWarning("Item {ItemId} does not exist or is not auctionable.", newBid.ItemId);
+                    return BadRequest("Item is not auctionable or does not exist.");
                 }
 
-                // Opret det nye bud
-                var createdBid = await _bidRepository.CreateBid(newBid);
-                return CreatedAtAction(nameof(GetBidById), new { id = createdBid.Id }, createdBid);
+                var now = DateTimeOffset.UtcNow;
+                if (now < auctionDetails.StartAuctionDateTime || now > auctionDetails.EndAuctionDateTime)
+                {
+                    _logger.LogWarning("Item {ItemId} is not auctionable at {CurrentTime}. Auction is valid from {Start} to {End}.", 
+                        newBid.ItemId, now, auctionDetails.StartAuctionDateTime, auctionDetails.EndAuctionDateTime);
+                    return BadRequest($"Item is not auctionable. Valid auction period: {auctionDetails.StartAuctionDateTime} to {auctionDetails.EndAuctionDateTime}");
+                }
+
+                _logger.LogInformation("Item {ItemId} is auctionable. Proceeding with bid.", newBid.ItemId);
+
+                // Publish bid to RabbitMQ
+                var published = await PublishToRabbitMQ(newBid);
+                if (!published)
+                {
+                    _logger.LogError("Failed to publish bid for {ItemId} to RabbitMQ.", newBid.ItemId);
+                    return StatusCode(500, "Failed to publish bid.");
+                }
+
+
+            // Publish bid to RabbitMQ
+            var published = await _rabbitMQPublisher.PublishToRabbitMQ(newBid);
+            if (!published)
+
+                _logger.LogInformation("Bid for {ItemId} published successfully to RabbitMQ.", newBid.ItemId);
+                return Ok(newBid); // Returner det nye bud
             }
-            catch (Exception ex)
+
             {
-                // Hvis der er en fejl, log den og returner en serverfejl
-                _logger.LogError(ex, "An error occurred while placing a bid.");
-                return StatusCode(500, "Internal server error.");
+                _logger.LogError(ex, "An error occurred while placing bid for item {ItemId}.", newBid.ItemId);
+                return StatusCode(500, "An error occurred while placing the bid.");
             }
         }
 
 
 
-        [HttpGet("{id}")]
-        public async Task<IActionResult> GetBidById(string id)
+        private async Task<AuctionDetails?> IsItemAuctionable(string itemId)
         {
-            try
+            // Check if the item's auction end time is in the cache
+            if (_memoryCache.TryGetValue(itemId, out DateTimeOffset cachedAuctionEndTime))
             {
-                // Async call to get the bid by ID
-                var bid = await _bidRepository.GetBidById(id);
-                if (bid == null)
+                var currentTime = DateTimeOffset.UtcNow;
+                if (currentTime <= cachedAuctionEndTime)
                 {
-                    return NotFound("Bid not found.");
+                    _logger.LogInformation("Item {ItemId} found in cache. Auction is valid until {AuctionEndTime}.", itemId, cachedAuctionEndTime);
+                    return new AuctionDetails
+                    {
+                        StartAuctionDateTime = currentTime, // Dummy, as it's not cached
+                        EndAuctionDateTime = cachedAuctionEndTime
+                    };
                 }
 
-                return Ok(bid);
+                // Remove expired cache
+                _memoryCache.Remove(itemId);
+                _logger.LogInformation("Item {ItemId} auction has expired. Removed from cache.", itemId);
+                return null;
             }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "An error occurred while getting a bid by ID.");
-                return StatusCode(500, "Internal server error.");
-            }
-        }
 
+            // Construct the request URL to check auctionable status
+            var existsUrl = $"{_config["AuctionServiceEndpoint"]}/auctionable/{itemId}";
+            _logger.LogInformation("Checking if item is auctionable at: {ExistsUrl}", existsUrl);
 
-        // Til tjek om items er auctionable
-        // Get auctionable items from the item service, should be a list
-         private async Task<Item?> GetAuctionableItems()
-        {
-            // Tjek om brugeren eksisterer
-            var existsUrl = $"{_config["ItemServiceEndpoint"]}/auctionable";
-            
-            
             var client = _httpClientFactory.CreateClient();
             HttpResponseMessage response;
 
@@ -105,53 +151,82 @@ namespace BidService.Controllers
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, ex.Message);
-                return null;
+                _logger.LogError(ex, "Error while checking if item is auctionable.");
+                return null; // Assume item is not auctionable on error
             }
 
             if (response.IsSuccessStatusCode)
             {
+                // Deserialize the response into an `Item` object
                 string responseContent = await response.Content.ReadAsStringAsync();
-                _logger.LogInformation("Response content: {ResponseContent}", responseContent);
+                var item = JsonSerializer.Deserialize<Item>(responseContent);
 
-                try
+                if (item == null)
                 {
-                    // Forsøg at deserialisere til User
-                    var item = JsonSerializer.Deserialize<Item>(responseContent);
-                    if (item == null)
-                    {
-                        _logger.LogInformation("No items Found.");
-                        return null;
-                    }
-
-                    _logger.LogInformation("Item data successfully deserialized.");
-                    return item;
-                }
-                catch (JsonException ex)
-                {
-                    _logger.LogError(ex, "Failed to deserialize Item data.");
+                    _logger.LogWarning("Failed to deserialize item {ItemId} auctionable status.", itemId);
                     return null;
                 }
+
+                var now = DateTimeOffset.UtcNow;
+
+                // Check if the current time is within the auction period
+                if (now >= item.StartAuctionDateTime && now <= item.EndAuctionDateTime)
+                {
+                    _logger.LogInformation("Item {ItemId} is auctionable between {StartDate} and {EndDate}.", 
+                        itemId, item.StartAuctionDateTime, item.EndAuctionDateTime);
+
+                    // Cache the auction end time with an expiration
+                    CacheAuctionEndTime(itemId, item.EndAuctionDateTime);
+                    return new AuctionDetails
+                    {
+                        StartAuctionDateTime = item.StartAuctionDateTime,
+                        EndAuctionDateTime = item.EndAuctionDateTime
+                    };
+                }
+
+                _logger.LogInformation("Item {ItemId} is not auctionable. Current time: {CurrentTime}, StartDate: {StartDate}, EndDate: {EndDate}.",
+                    itemId, now, item.StartAuctionDateTime, item.EndAuctionDateTime);
+                return null;
             }
-            _logger.LogWarning("Failed to check if user exists.");
-            return null;
+
+            _logger.LogWarning("Failed to determine if item {ItemId} is auctionable. Response status code: {StatusCode}.", itemId, response.StatusCode);
+            return null; // Default to not auctionable if status is unknown
         }
 
 
-        [HttpGet("items")]
-        public async Task<IActionResult> GetItems()
+        // Method to cache the auction end time
+        private void CacheAuctionEndTime(string itemId, DateTimeOffset endAuctionTime)
         {
-            var items = await GetAuctionableItems();
-            if (items == null)
+            var cacheExpiryOptions = new MemoryCacheEntryOptions
+            {
+                AbsoluteExpiration = endAuctionTime, // Expire the cache when the auction ends
+                SlidingExpiration = null, // No sliding expiration since the auction end time is fixed
+                Priority = CacheItemPriority.High
+            };
+            _memoryCache.Set(itemId, endAuctionTime, cacheExpiryOptions);
+            _logger.LogInformation("Cached auction end time for item {ItemId}. Auction valid until {AuctionEndTime}.", itemId, endAuctionTime);
+        }
+
+
+        // simpel get for at teste om den kan hente bool på auctionable item
+        // tager både itemid og datetime som parameter
+        [HttpGet("auctionable/{itemId}")]
+        public async Task<IActionResult> GetAuctionableItem(string itemId)
+        {
+            var item = await IsItemAuctionable(itemId);
+            if (item == null)
             {
                 return Ok(null); // Returnerer null, hvis ingen items findes
             }
 
-            return Ok(items); // Returnerer 200 OK med items
+            return Ok(item); // Returnerer 200 OK med items
         }
 
 
-    }
-}
+        // Her skal der implementeres en metode til at poste et bud til rabbitMQ
+        // I metoden skal ovenstående metode kaldes for at tjekke om item er auctionable
+        // Dertil skal der også valideres om det nye bud er højere end det nuværende højeste bud
+
+
     }
 }

@@ -1,4 +1,4 @@
-namespace BidServiceAPI.Models;
+namespace BidServiceAPI.Models
 {
     using System;
     using System.Collections.Generic;
@@ -6,12 +6,14 @@ namespace BidServiceAPI.Models;
     using System.Text.Json;
     using System.Text.Json.Serialization;
     using System.Globalization;
-    
+    using MongoDB.Bson;
+    using MongoDB.Bson.Serialization.Attributes;
 
     
     public partial class Item
     {
-        
+        [BsonId]
+        [BsonRepresentation(BsonType.ObjectId)]
         /// <summary>
         /// A unique identifier for the item (MongoDB ObjectId).
         /// </summary>
