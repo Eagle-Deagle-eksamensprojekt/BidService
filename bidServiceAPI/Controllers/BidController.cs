@@ -6,107 +6,89 @@ using BidServiceAPI.Models;
 using System.Text.Json;
 using RabbitMQ.Client;
 using System.Text;
-using Microsoft.Extensions.Caching.Memory;
-
+using System.Diagnostics;
 
 namespace BidService.Controllers
 {
     [ApiController]
-    [Route("api/[controller]")]
+    [Route("[controller]")]
     public class BidController : ControllerBase
     {
         private readonly ILogger<BidController> _logger;
         private readonly IHttpClientFactory _httpClientFactory;
         private readonly IConnectionFactory _connectionFactory;
         private readonly IConfiguration _config;
-        private readonly IMemoryCache _memoryCache;
-        public BidController(ILogger<BidController> logger, IConfiguration config, IHttpClientFactory httpClientFactory, IConnectionFactory connectionFactory, IMemoryCache memoryCache)
+        private readonly RabbitMQListener _rabbitMQListener;
+        private readonly RabbitMQPublisher _rabbitMQPublisher;
+        public BidController(ILogger<BidController> logger, IConfiguration config, IHttpClientFactory httpClientFactory, IConnectionFactory connectionFactory, RabbitMQListener rabbitMQListener, RabbitMQPublisher rabbitMQPublisher)
         {
             _logger = logger;
             _config = config;
             _httpClientFactory = httpClientFactory;
             _connectionFactory = connectionFactory;
-            _memoryCache = memoryCache;
-        }/*
-        {
-            _logger = logger;
-            _config = config;
-            _httpClientFactory = httpClientFactory;
-        }*/
+            _rabbitMQListener = rabbitMQListener;
+            _rabbitMQPublisher = rabbitMQPublisher;
+        }
 
+        /// <summary>
+        /// Hent version af Service
+        /// </summary>
+        [HttpGet("version")]
+        public async Task<Dictionary<string,string>> GetVersion()
+        {
+            var properties = new Dictionary<string, string>();
+            var assembly = typeof(Program).Assembly;
+
+            properties.Add("service", "OrderService");
+            var ver = FileVersionInfo.GetVersionInfo(
+                typeof(Program).Assembly.Location).ProductVersion ?? "N/A";
+            properties.Add("version", ver);
+            
+            var hostName = System.Net.Dns.GetHostName();
+            var ips = await System.Net.Dns.GetHostAddressesAsync(hostName);
+            var ipa = ips.First().MapToIPv4().ToString() ?? "N/A";
+            properties.Add("ip-address", ipa);
+            
+            return properties;
+        }
+
+        // POST place a bid on an item
         [HttpPost]
         public async Task<IActionResult> PlaceBid([FromBody] Bid newBid)
         {
             _logger.LogInformation("Placing bid on item {ItemId} for {Amount:C}.", newBid.ItemId, newBid.Amount);
 
-            try
+            // Tjek om item er auctionable
+            var auctionable = await IsItemAuctionable(newBid.ItemId);
+            if (!auctionable)
             {
-                // Tjek om item er auctionable
-                var auctionDetails = await IsItemAuctionable(newBid.ItemId);
-                if (auctionDetails == null)
-                {
-                    _logger.LogWarning("Item {ItemId} does not exist or is not auctionable.", newBid.ItemId);
-                    return BadRequest("Item is not auctionable or does not exist.");
-                }
-
-                var now = DateTimeOffset.UtcNow;
-                if (now < auctionDetails.StartAuctionDateTime || now > auctionDetails.EndAuctionDateTime)
-                {
-                    _logger.LogWarning("Item {ItemId} is not auctionable at {CurrentTime}. Auction is valid from {Start} to {End}.", 
-                        newBid.ItemId, now, auctionDetails.StartAuctionDateTime, auctionDetails.EndAuctionDateTime);
-                    return BadRequest($"Item is not auctionable. Valid auction period: {auctionDetails.StartAuctionDateTime} to {auctionDetails.EndAuctionDateTime}");
-                }
-
-                _logger.LogInformation("Item {ItemId} is auctionable. Proceeding with bid.", newBid.ItemId);
-
-                // Publish bid to RabbitMQ
-                var published = await PublishToRabbitMQ(newBid);
-                if (!published)
-                {
-                    _logger.LogError("Failed to publish bid for {ItemId} to RabbitMQ.", newBid.ItemId);
-                    return StatusCode(500, "Failed to publish bid.");
-                }
-
-                _logger.LogInformation("Bid for {ItemId} published successfully to RabbitMQ.", newBid.ItemId);
-                return Ok(newBid); // Returner det nye bud
+                _logger.LogWarning("Item {ItemId} is not auctionable.", newBid.ItemId);
+                return BadRequest("Item is not auctionable.");
             }
-            catch (Exception ex)
+
+            // Publish bid to RabbitMQ
+            var published = await _rabbitMQPublisher.PublishToRabbitMQ(newBid);
+            if (!published)
             {
-                _logger.LogError(ex, "An error occurred while placing bid for item {ItemId}.", newBid.ItemId);
-                return StatusCode(500, "An error occurred while placing the bid.");
+                _logger.LogError("Failed to publish bid for {ItemId} to RabbitMQ.", newBid.ItemId);
+                return StatusCode(500, "Failed to publish bid.");
             }
+
+            _logger.LogInformation("Bid for {ItemId} published successfully to RabbitMQ.", newBid.ItemId);
+            return Ok(newBid); // Returner det nye bud
         }
 
-
-
-        private async Task<AuctionDetails?> IsItemAuctionable(string itemId)
+        // Til tjek om item er auctionable returnerer null hvis item ikke er auctionable
+        // Get auctionable items from the item service
+        private async Task<bool> IsItemAuctionable(string itemId)
         {
-            // Check if the item's auction end time is in the cache
-            if (_memoryCache.TryGetValue(itemId, out DateTimeOffset cachedAuctionEndTime))
-            {
-                var currentTime = DateTimeOffset.UtcNow;
-                if (currentTime <= cachedAuctionEndTime)
-                {
-                    _logger.LogInformation("Item {ItemId} found in cache. Auction is valid until {AuctionEndTime}.", itemId, cachedAuctionEndTime);
-                    return new AuctionDetails
-                    {
-                        StartAuctionDateTime = currentTime, // Dummy, as it's not cached
-                        EndAuctionDateTime = cachedAuctionEndTime
-                    };
-                }
-
-                // Remove expired cache
-                _memoryCache.Remove(itemId);
-                _logger.LogInformation("Item {ItemId} auction has expired. Removed from cache.", itemId);
-                return null;
-            }
-
-            // Construct the request URL to check auctionable status
-            var existsUrl = $"{_config["AuctionServiceEndpoint"]}/auctionable/{itemId}";
+            var existsUrl = $"{_config["AuctionServiceEndpoint"]}/auctionable/{itemId}?dateTime={DateTimeOffset.UtcNow.UtcDateTime}"; // Der er så¨meget bøvl med dato formatet, nu virker det
             _logger.LogInformation("Checking if item is auctionable at: {ExistsUrl}", existsUrl);
 
             var client = _httpClientFactory.CreateClient();
             HttpResponseMessage response;
+
+            //Indsæt cash ind her, sæt evt. en udløbsdato på
 
             try
             {
@@ -116,61 +98,28 @@ namespace BidService.Controllers
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error while checking if item is auctionable.");
-                return null; // Assume item is not auctionable on error
+                return false; // Antag som default, at item ikke er auctionable ved fejl
             }
 
             if (response.IsSuccessStatusCode)
             {
-                // Deserialize the response into an `Item` object
+                // Deserialiser respons som bool
                 string responseContent = await response.Content.ReadAsStringAsync();
-                var item = JsonSerializer.Deserialize<Item>(responseContent);
+                bool itemAuctionable = JsonSerializer.Deserialize<bool>(responseContent);
 
-                if (item == null)
+                if (itemAuctionable)
                 {
-                    _logger.LogWarning("Failed to deserialize item {ItemId} auctionable status.", itemId);
-                    return null;
+                    _logger.LogInformation("Item {ItemId} is auctionable.", itemId);
+                    return true;
                 }
 
-                var now = DateTimeOffset.UtcNow;
-
-                // Check if the current time is within the auction period
-                if (now >= item.StartAuctionDateTime && now <= item.EndAuctionDateTime)
-                {
-                    _logger.LogInformation("Item {ItemId} is auctionable between {StartDate} and {EndDate}.", 
-                        itemId, item.StartAuctionDateTime, item.EndAuctionDateTime);
-
-                    // Cache the auction end time with an expiration
-                    CacheAuctionEndTime(itemId, item.EndAuctionDateTime);
-                    return new AuctionDetails
-                    {
-                        StartAuctionDateTime = item.StartAuctionDateTime,
-                        EndAuctionDateTime = item.EndAuctionDateTime
-                    };
-                }
-
-                _logger.LogInformation("Item {ItemId} is not auctionable. Current time: {CurrentTime}, StartDate: {StartDate}, EndDate: {EndDate}.",
-                    itemId, now, item.StartAuctionDateTime, item.EndAuctionDateTime);
-                return null;
+                _logger.LogInformation("Item {ItemId} is not auctionable.", itemId);
+                return false;
             }
 
-            _logger.LogWarning("Failed to determine if item {ItemId} is auctionable. Response status code: {StatusCode}.", itemId, response.StatusCode);
-            return null; // Default to not auctionable if status is unknown
+            _logger.LogWarning("Failed to determine if item {ItemId} is auctionable.", itemId);
+            return false; // Antag som default, at item ikke er auctionable ved ukendt status
         }
-
-
-        // Method to cache the auction end time
-        private void CacheAuctionEndTime(string itemId, DateTimeOffset endAuctionTime)
-        {
-            var cacheExpiryOptions = new MemoryCacheEntryOptions
-            {
-                AbsoluteExpiration = endAuctionTime, // Expire the cache when the auction ends
-                SlidingExpiration = null, // No sliding expiration since the auction end time is fixed
-                Priority = CacheItemPriority.High
-            };
-            _memoryCache.Set(itemId, endAuctionTime, cacheExpiryOptions);
-            _logger.LogInformation("Cached auction end time for item {ItemId}. Auction valid until {AuctionEndTime}.", itemId, endAuctionTime);
-        }
-
 
         // simpel get for at teste om den kan hente bool på auctionable item
         // tager både itemid og datetime som parameter
@@ -190,72 +139,6 @@ namespace BidService.Controllers
         // Her skal der implementeres en metode til at poste et bud til rabbitMQ
         // I metoden skal ovenstående metode kaldes for at tjekke om item er auctionable
         // Dertil skal der også valideres om det nye bud er højere end det nuværende højeste bud
-
-        private async Task<bool> PublishToRabbitMQ(Bid bid)
-        {
-            var rabbitHost = $"{_config["RABBITMQ_HOST"]}" ?? "localhost"; // Default til localhost
-
-            try
-            {
-                // RabbitMQ connection factory
-                var factory = new ConnectionFactory
-                {
-                    HostName = rabbitHost,
-                    DispatchConsumersAsync = true // Hvis du vil understøtte async consumers
-                };
-
-                // Create connection
-                using var connection = _connectionFactory.CreateConnection();
-                using var channel = connection.CreateModel();
-
-                // Queue name based on AuctionId
-                var itemId = bid.ItemId;
-                if (itemId == null)
-                {
-                    _logger.LogError("Failed to get ItemId from bid.");
-                    return false;
-                }
-                var queueName = $"{itemId}Queue";
-
-                // Declare the queue (only necessary the first time)
-                channel.QueueDeclare(
-                    queue: queueName,
-                    durable: false,
-                    exclusive: false,
-                    autoDelete: false,
-                    arguments: null
-                );
-
-                // Serialize bid object to JSON
-                var message = JsonSerializer.Serialize(bid);
-                var body = Encoding.UTF8.GetBytes(message);
-
-                // Publish the message to RabbitMQ
-                channel.BasicPublish(
-                    exchange: "",
-                    routingKey: queueName,
-                    basicProperties: null,
-                    body: body
-                );
-
-                _logger.LogInformation("Published bid {BidId} to RabbitMQ queue {QueueName}.", bid.Id, queueName);
-                return true;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Failed to publish bid {BidId} to RabbitMQ.", bid.Id);
-                return false;
-            }
-        }
-
-
-        public class AuctionDetails
-        {
-            public DateTimeOffset StartAuctionDateTime { get; set; }
-            public DateTimeOffset EndAuctionDateTime { get; set; }
-        }
-
-
 
     }
 }
