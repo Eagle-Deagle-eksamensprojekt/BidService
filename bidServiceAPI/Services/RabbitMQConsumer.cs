@@ -10,6 +10,7 @@ public class RabbitMQListener : BackgroundService
     private readonly IConnection _connection;
     private readonly IModel _channel;
     private readonly IConfiguration _config;
+    private string? _activeItemId;
 
     public RabbitMQListener(ILogger<RabbitMQListener> logger, IConfiguration config)
     {
@@ -17,67 +18,86 @@ public class RabbitMQListener : BackgroundService
         _config = config;
 
         var rabbitHost = config["RABBITMQ_HOST"] ?? "localhost";
-        var factory = new ConnectionFactory() { HostName = rabbitHost };
+        var factory = new ConnectionFactory { HostName = rabbitHost };
 
         _connection = factory.CreateConnection();
         _channel = _connection.CreateModel();
     }
 
-    protected override Task ExecuteAsync(CancellationToken stoppingToken)
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        // Kør lytteren på en separat opgave
-        Task.Run(() => ListenForAuctions(stoppingToken), stoppingToken);
-        return Task.CompletedTask;
-    }
-
-    private void ListenForAuctions(CancellationToken token)
-    {
-        var auctionQueueName = _config["TodaysAuctionsRabbitQueue"] ?? "TodaysAuctions";
-
-        _channel.QueueDeclare(
-            queue: auctionQueueName,
-            durable: false,
-            exclusive: false,
-            autoDelete: false,
-            arguments: null
-        );
-
-        var consumer = new EventingBasicConsumer(_channel);
-        consumer.Received += (model, ea) =>
+        while (!stoppingToken.IsCancellationRequested)
         {
-            var body = ea.Body.ToArray();
-            var message = Encoding.UTF8.GetString(body);
+            var now = DateTime.UtcNow;
 
-            var auction = JsonSerializer.Deserialize<Auction>(message);
-            if (auction != null)
+            // Start auction logic at 7:00
+            if (now.Hour == 7 && now.Minute == 0 && _activeItemId == null)
             {
-                _logger.LogInformation("Received auction for ItemId {ItemId}.", auction.Id);
-                ProcessAuction(auction);
+                _logger.LogInformation("Starting auction for the day...");
+                StartAuction(stoppingToken);
             }
-        };
 
-        _channel.BasicConsume(queue: auctionQueueName, autoAck: true, consumer: consumer);
-        _logger.LogInformation("Started listening for auctions on queue {QueueName}.", auctionQueueName);
+            // Stop auction logic at 18:00
+            if (now.Hour == 18 && now.Minute == 0 && _activeItemId != null)
+            {
+                _logger.LogInformation("Stopping auction for the day...");
+                StopAuction();
+            }
 
-        // Forbliv i live, så længe token ikke er annulleret
-        while (!token.IsCancellationRequested)
-        {
-            Thread.Sleep(1000); // Undgå unødvendig CPU-brug
+            await Task.Delay(TimeSpan.FromMinutes(1), stoppingToken);
         }
     }
 
-    private void ProcessAuction(Auction auction)
+    public void StartAuction(CancellationToken stoppingToken)
     {
-        var queueName = $"{auction.Id}Queue";
+        var queueName = _config["TodaysAuctionsRabbitQueue"] ?? "TodaysAuctions";
+
+        // Fetch a single message
+        var result = _channel.BasicGet(queueName, autoAck: true); // BasicGet sikre at vi kun henter en besked fra køen
+        if (result == null)
+        {
+            _logger.LogWarning("No auctions available in the queue.");
+            return;
+        }
+
+        var message = Encoding.UTF8.GetString(result.Body.ToArray());
+        var auction = JsonSerializer.Deserialize<Auction>(message);
+
+        if (auction == null)
+        {
+            _logger.LogError("Failed to deserialize auction message.");
+            return;
+        }
+
+        _activeItemId = auction.Id;
+        _logger.LogInformation("Auction started for ItemId {ItemId}.", _activeItemId);
+
+        // Declare queue for bids
+        var bidQueueName = $"{_activeItemId}Queue";
         _channel.QueueDeclare(
-            queue: queueName,
+            queue: bidQueueName,
             durable: false,
             exclusive: false,
             autoDelete: false,
             arguments: null
         );
 
-        _logger.LogInformation("Queue {QueueName} created for ItemId {ItemId}.", queueName, auction.Id);
+        _logger.LogInformation("Bid queue {QueueName} declared for ItemId {ItemId}.", bidQueueName, _activeItemId);
+    }
+
+    private void StopAuction()
+    {
+        if (_activeItemId == null)
+        {
+            _logger.LogWarning("No active auction to stop.");
+            return;
+        }
+
+        var bidQueueName = $"{_activeItemId}Queue";
+        _logger.LogInformation("Stopping auction for ItemId {ItemId}. Deleting queue {QueueName}.", _activeItemId, bidQueueName);
+
+        _channel.QueueDelete(bidQueueName);
+        _activeItemId = null;
     }
 
     public override void Dispose()

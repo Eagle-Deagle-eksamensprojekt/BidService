@@ -17,13 +17,15 @@ namespace BidService.Controllers
         private readonly IConfiguration _config;
         private readonly RabbitMQPublisher _rabbitMQPublisher; 
         private readonly IMemoryCache _memoryCache;
-        public BidController(ILogger<BidController> logger, IConfiguration config, IHttpClientFactory httpClientFactory, RabbitMQPublisher rabbitMQPublisher, IMemoryCache memoryCache)
+        private readonly RabbitMQListener _rabbitMQListener;
+        public BidController(ILogger<BidController> logger, IConfiguration config, IHttpClientFactory httpClientFactory, RabbitMQPublisher rabbitMQPublisher, IMemoryCache memoryCache, RabbitMQListener rabbitMQListener)
         {
             _logger = logger;
             _config = config;
             _httpClientFactory = httpClientFactory;
             _memoryCache = memoryCache;
             _rabbitMQPublisher = rabbitMQPublisher;
+            _rabbitMQListener = rabbitMQListener;
         }
 
         /// <summary>
@@ -41,7 +43,7 @@ namespace BidService.Controllers
             return properties;
         }
 
-        
+
 
         [HttpPost]
         public async Task<IActionResult> PlaceBid([FromBody] Bid newBid)
@@ -196,6 +198,15 @@ namespace BidService.Controllers
         // I metoden skal ovenstående metode kaldes for at tjekke om item er auctionable
         // Dertil skal der også valideres om det nye bud er højere end det nuværende højeste bud
 
+
+        [HttpPost("start-listener")]
+        public async Task<IActionResult> StartListener()
+        {
+            // Trigger ScheduleAuctions method manually
+            var cancellationToken = new CancellationToken(); // you can pass a valid token if needed
+            _rabbitMQListener.StartAuction(cancellationToken);
+            return Ok("BidService listener started.");
+        }
 
     }
 
