@@ -6,29 +6,51 @@ using BidServiceAPI.Models;
 using System.Text.Json;
 using RabbitMQ.Client;
 using System.Text;
+using System.Diagnostics;
 
 namespace BidService.Controllers
 {
     [ApiController]
-    [Route("api/[controller]")]
+    [Route("[controller]")]
     public class BidController : ControllerBase
     {
         private readonly ILogger<BidController> _logger;
         private readonly IHttpClientFactory _httpClientFactory;
         private readonly IConnectionFactory _connectionFactory;
         private readonly IConfiguration _config;
-        public BidController(ILogger<BidController> logger, IConfiguration config, IHttpClientFactory httpClientFactory, IConnectionFactory connectionFactory)
+        private readonly RabbitMQListener _rabbitMQListener;
+        private readonly RabbitMQPublisher _rabbitMQPublisher;
+        public BidController(ILogger<BidController> logger, IConfiguration config, IHttpClientFactory httpClientFactory, IConnectionFactory connectionFactory, RabbitMQListener rabbitMQListener, RabbitMQPublisher rabbitMQPublisher)
         {
             _logger = logger;
             _config = config;
             _httpClientFactory = httpClientFactory;
             _connectionFactory = connectionFactory;
-        }/*
+            _rabbitMQListener = rabbitMQListener;
+            _rabbitMQPublisher = rabbitMQPublisher;
+        }
+
+        /// <summary>
+        /// Hent version af Service
+        /// </summary>
+        [HttpGet("version")]
+        public async Task<Dictionary<string,string>> GetVersion()
         {
-            _logger = logger;
-            _config = config;
-            _httpClientFactory = httpClientFactory;
-        }*/
+            var properties = new Dictionary<string, string>();
+            var assembly = typeof(Program).Assembly;
+
+            properties.Add("service", "OrderService");
+            var ver = FileVersionInfo.GetVersionInfo(
+                typeof(Program).Assembly.Location).ProductVersion ?? "N/A";
+            properties.Add("version", ver);
+            
+            var hostName = System.Net.Dns.GetHostName();
+            var ips = await System.Net.Dns.GetHostAddressesAsync(hostName);
+            var ipa = ips.First().MapToIPv4().ToString() ?? "N/A";
+            properties.Add("ip-address", ipa);
+            
+            return properties;
+        }
 
         // POST place a bid on an item
         [HttpPost]
@@ -45,7 +67,7 @@ namespace BidService.Controllers
             }
 
             // Publish bid to RabbitMQ
-            var published = await PublishToRabbitMQ(newBid);
+            var published = await _rabbitMQPublisher.PublishToRabbitMQ(newBid);
             if (!published)
             {
                 _logger.LogError("Failed to publish bid for {ItemId} to RabbitMQ.", newBid.ItemId);
@@ -117,65 +139,6 @@ namespace BidService.Controllers
         // Her skal der implementeres en metode til at poste et bud til rabbitMQ
         // I metoden skal ovenstående metode kaldes for at tjekke om item er auctionable
         // Dertil skal der også valideres om det nye bud er højere end det nuværende højeste bud
-
-        private async Task<bool> PublishToRabbitMQ(Bid bid)
-        {
-            var rabbitHost = $"{_config["RABBITMQ_HOST"]}" ?? "localhost"; // Default til localhost
-
-            try
-            {
-                // RabbitMQ connection factory
-                var factory = new ConnectionFactory
-                {
-                    HostName = rabbitHost,
-                    DispatchConsumersAsync = true // Hvis du vil understøtte async consumers
-                };
-
-                // Create connection
-                using var connection = _connectionFactory.CreateConnection();
-                using var channel = connection.CreateModel();
-
-                // Queue name based on AuctionId
-                var itemId = _config["ITEM_ID"] ?? bid.ItemId; // Default til bid.ItemId
-                if (itemId == null)
-                {
-                    _logger.LogError("Failed to get ItemId from bid.");
-                    return false;
-                }
-                var queueName = $"{itemId}Queue";
-
-                // Declare the queue (only necessary the first time)
-                channel.QueueDeclare(
-                    queue: queueName,
-                    durable: false,
-                    exclusive: false,
-                    autoDelete: false,
-                    arguments: null
-                );
-
-                // Serialize bid object to JSON
-                var message = JsonSerializer.Serialize(bid);
-                var body = Encoding.UTF8.GetBytes(message);
-
-                // Publish the message to RabbitMQ
-                channel.BasicPublish(
-                    exchange: "",
-                    routingKey: queueName,
-                    basicProperties: null,
-                    body: body
-                );
-
-                _logger.LogInformation("Published bid {BidId} to RabbitMQ queue {QueueName}.", bid.Id, queueName);
-                return true;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Failed to publish bid {BidId} to RabbitMQ.", bid.Id);
-                return false;
-            }
-        }
-
-
 
     }
 }
