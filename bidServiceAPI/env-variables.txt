@@ -1,6 +1,4 @@
 export ASPNETCORE_ENVIRONMENT=Development
-export MongoConnectionString=mongodb://admin:1234@localhost:27019/
-export DatabaseName=BidDB
-export CollectionName=bids
 export Loki=http://localhost:3100
 export AuctionServiceEndpoint=http://localhost:5256/auction
+export TodaysAuctionsRabbitQueue=TodaysAuctions
