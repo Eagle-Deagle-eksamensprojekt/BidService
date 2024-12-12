@@ -49,7 +49,7 @@ public class RabbitMQListener : BackgroundService
 
     public async Task ListenOnQueue() // , CancellationToken token)
     {
-        var queueName = _config["TodaysAuctions"];
+        var queueName = _config["TodaysAuctionsRabbitQueue"];
         // Kan der sættes en timer på? Således den stopper efter en given tid?
         _channel.QueueDeclare(queue: queueName, durable: false, exclusive: false, autoDelete: false, arguments: null);
 

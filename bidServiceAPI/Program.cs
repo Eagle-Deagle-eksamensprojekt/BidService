@@ -15,6 +15,10 @@ builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
+builder.Services.AddMemoryCache();
+
+builder.Services.AddSingleton<RabbitMQListener>(); // Register RabbitMQ listener as a singleton
+
 builder.Services.AddSingleton<IConnectionFactory>(sp =>
 {
     var config = sp.GetRequiredService<IConfiguration>();
@@ -38,6 +42,10 @@ builder.Logging.AddConsole(); // Logger til konsollen, synlig med `docker logs`
 builder.Services.AddHttpClient(); //tjek
 
 var app = builder.Build();
+
+var rabbitListener = app.Services.GetRequiredService<RabbitMQListener>();
+
+await rabbitListener.ListenOnQueue();
 
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())

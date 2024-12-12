@@ -7,6 +7,9 @@ using System.Text.Json;
 using RabbitMQ.Client;
 using System.Text;
 using System.Diagnostics;
+using Microsoft.Extensions.Caching.Memory;
+
+
 
 namespace BidService.Controllers
 {
@@ -18,14 +21,17 @@ namespace BidService.Controllers
         private readonly IHttpClientFactory _httpClientFactory;
         private readonly IConnectionFactory _connectionFactory;
         private readonly IConfiguration _config;
+
         private readonly RabbitMQListener _rabbitMQListener;
-        private readonly RabbitMQPublisher _rabbitMQPublisher;
-        public BidController(ILogger<BidController> logger, IConfiguration config, IHttpClientFactory httpClientFactory, IConnectionFactory connectionFactory, RabbitMQListener rabbitMQListener, RabbitMQPublisher rabbitMQPublisher)
+        private readonly RabbitMQPublisher _rabbitMQPublisher; 
+        private readonly IMemoryCache _memoryCache;
+        public BidController(ILogger<BidController> logger, IConfiguration config, IHttpClientFactory httpClientFactory, IConnectionFactory connectionFactory, RabbitMQListener rabbitMQListener, RabbitMQPublisher rabbitMQPublisher, IMemoryCache memoryCache)
         {
             _logger = logger;
             _config = config;
             _httpClientFactory = httpClientFactory;
             _connectionFactory = connectionFactory;
+            _memoryCache = memoryCache;
             _rabbitMQListener = rabbitMQListener;
             _rabbitMQPublisher = rabbitMQPublisher;
         }
@@ -52,7 +58,6 @@ namespace BidService.Controllers
             return properties;
         }
 
-        // POST place a bid on an item
         [HttpPost]
         public async Task<IActionResult> PlaceBid([FromBody] Bid newBid)
         {
@@ -66,21 +71,23 @@ namespace BidService.Controllers
                 return BadRequest("Item is not auctionable.");
             }
 
-            // Publish bid to RabbitMQ
-            var published = await _rabbitMQPublisher.PublishToRabbitMQ(newBid);
-            if (!published)
-            {
-                _logger.LogError("Failed to publish bid for {ItemId} to RabbitMQ.", newBid.ItemId);
-                return StatusCode(500, "Failed to publish bid.");
-            }
+                // Publish bid to RabbitMQ
+                var published = await _rabbitMQPublisher.PublishToRabbitMQ(newBid);
+                if (!published)
 
-            _logger.LogInformation("Bid for {ItemId} published successfully to RabbitMQ.", newBid.ItemId);
-            return Ok(newBid); // Returner det nye bud
+                _logger.LogInformation("Bid for {ItemId} published successfully to RabbitMQ.", newBid.ItemId);
+                return Ok(newBid); // Returner det nye bud
+            }
+            
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "An error occurred while placing bid for item {ItemId}.", newBid.ItemId);
+                return StatusCode(500, "An error occurred while placing the bid.");
+            }
         }
 
-        // Til tjek om item er auctionable returnerer null hvis item ikke er auctionable
-        // Get auctionable items from the item service
-        private async Task<bool> IsItemAuctionable(string itemId)
+
+        private async Task<AuctionDetails?> IsItemAuctionable(string itemId)
         {
             var existsUrl = $"{_config["AuctionServiceEndpoint"]}/auctionable/{itemId}?dateTime={DateTimeOffset.UtcNow.UtcDateTime}"; // Der er så¨meget bøvl med dato formatet, nu virker det
             _logger.LogInformation("Checking if item is auctionable at: {ExistsUrl}", existsUrl);
@@ -140,5 +147,12 @@ namespace BidService.Controllers
         // I metoden skal ovenstående metode kaldes for at tjekke om item er auctionable
         // Dertil skal der også valideres om det nye bud er højere end det nuværende højeste bud
 
+
+    }
+
+    internal class AuctionDetails
+    {
+        public DateTimeOffset StartAuctionDateTime { get; set; }
+        public DateTimeOffset EndAuctionDateTime { get; set; }
     }
 }
