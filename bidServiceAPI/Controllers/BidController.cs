@@ -23,18 +23,15 @@ namespace BidService.Controllers
         private readonly IConfiguration _config;
 
         private readonly RabbitMQListener _rabbitMQListener;
-        private readonly RabbitMQPublisher _rabbitMQPublisher;
-        public BidController(ILogger<BidController> logger, IConfiguration config, IHttpClientFactory httpClientFactory, IConnectionFactory connectionFactory, RabbitMQListener rabbitMQListener, RabbitMQPublisher rabbitMQPublisher)
-
+        private readonly RabbitMQPublisher _rabbitMQPublisher; 
         private readonly IMemoryCache _memoryCache;
-        public BidController(ILogger<BidController> logger, IConfiguration config, IHttpClientFactory httpClientFactory, IConnectionFactory connectionFactory, IMemoryCache memoryCache)
-
+        public BidController(ILogger<BidController> logger, IConfiguration config, IHttpClientFactory httpClientFactory, IConnectionFactory connectionFactory, RabbitMQListener rabbitMQListener, RabbitMQPublisher rabbitMQPublisher, IMemoryCache memoryCache)
         {
             _logger = logger;
             _config = config;
             _httpClientFactory = httpClientFactory;
             _connectionFactory = connectionFactory;
-
+            _memoryCache = memoryCache;
             _rabbitMQListener = rabbitMQListener;
             _rabbitMQPublisher = rabbitMQPublisher;
         }
@@ -44,10 +41,6 @@ namespace BidService.Controllers
         /// </summary>
         [HttpGet("version")]
         public async Task<Dictionary<string,string>> GetVersion()
-
-            _memoryCache = memoryCache;
-        }/*
-
         {
             var properties = new Dictionary<string, string>();
             var assembly = typeof(Program).Assembly;
@@ -91,28 +84,19 @@ namespace BidService.Controllers
                 _logger.LogInformation("Item {ItemId} is auctionable. Proceeding with bid.", newBid.ItemId);
 
                 // Publish bid to RabbitMQ
-                var published = await PublishToRabbitMQ(newBid);
+                var published = await _rabbitMQPublisher.PublishToRabbitMQ(newBid);
                 if (!published)
-                {
-                    _logger.LogError("Failed to publish bid for {ItemId} to RabbitMQ.", newBid.ItemId);
-                    return StatusCode(500, "Failed to publish bid.");
-                }
-
-
-            // Publish bid to RabbitMQ
-            var published = await _rabbitMQPublisher.PublishToRabbitMQ(newBid);
-            if (!published)
 
                 _logger.LogInformation("Bid for {ItemId} published successfully to RabbitMQ.", newBid.ItemId);
                 return Ok(newBid); // Returner det nye bud
             }
-
+            
+            catch (Exception ex)
             {
                 _logger.LogError(ex, "An error occurred while placing bid for item {ItemId}.", newBid.ItemId);
                 return StatusCode(500, "An error occurred while placing the bid.");
             }
         }
-
 
 
         private async Task<AuctionDetails?> IsItemAuctionable(string itemId)
@@ -228,5 +212,11 @@ namespace BidService.Controllers
         // Dertil skal der også valideres om det nye bud er højere end det nuværende højeste bud
 
 
+    }
+
+    internal class AuctionDetails
+    {
+        public DateTimeOffset StartAuctionDateTime { get; set; }
+        public DateTimeOffset EndAuctionDateTime { get; set; }
     }
 }
