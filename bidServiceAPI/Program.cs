@@ -15,8 +15,6 @@ builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
-builder.Services.AddMemoryCache();
-
 builder.Services.AddSingleton<IConnectionFactory>(sp =>
 {
     var config = sp.GetRequiredService<IConfiguration>();
@@ -33,6 +31,8 @@ builder.Services.AddSingleton<IConnectionFactory>(sp =>
 // Registrér at I ønsker at bruge NLOG som logger fremadrettet (før builder.build)
 builder.Logging.ClearProviders();
 builder.Host.UseNLog();
+builder.Logging.AddConsole(); // Logger til konsollen, synlig med `docker logs`
+
 
 // Register HttpClientFactory
 builder.Services.AddHttpClient(); //tjek
