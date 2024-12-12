@@ -1,11 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Extensions.Logging;
-using System;
-using System.Threading.Tasks;
 using BidServiceAPI.Models;
 using System.Text.Json;
-using RabbitMQ.Client;
-using System.Text;
 using System.Diagnostics;
 using Microsoft.Extensions.Caching.Memory;
 
@@ -19,20 +14,15 @@ namespace BidService.Controllers
     {
         private readonly ILogger<BidController> _logger;
         private readonly IHttpClientFactory _httpClientFactory;
-        private readonly IConnectionFactory _connectionFactory;
         private readonly IConfiguration _config;
-
-        private readonly RabbitMQListener _rabbitMQListener;
         private readonly RabbitMQPublisher _rabbitMQPublisher; 
         private readonly IMemoryCache _memoryCache;
-        public BidController(ILogger<BidController> logger, IConfiguration config, IHttpClientFactory httpClientFactory, IConnectionFactory connectionFactory, RabbitMQListener rabbitMQListener, RabbitMQPublisher rabbitMQPublisher, IMemoryCache memoryCache)
+        public BidController(ILogger<BidController> logger, IConfiguration config, IHttpClientFactory httpClientFactory, RabbitMQPublisher rabbitMQPublisher, IMemoryCache memoryCache)
         {
             _logger = logger;
             _config = config;
             _httpClientFactory = httpClientFactory;
-            _connectionFactory = connectionFactory;
             _memoryCache = memoryCache;
-            _rabbitMQListener = rabbitMQListener;
             _rabbitMQPublisher = rabbitMQPublisher;
         }
 
@@ -43,20 +33,15 @@ namespace BidService.Controllers
         public async Task<Dictionary<string,string>> GetVersion()
         {
             var properties = new Dictionary<string, string>();
-            var assembly = typeof(Program).Assembly;
 
-            properties.Add("service", "OrderService");
             var ver = FileVersionInfo.GetVersionInfo(
                 typeof(Program).Assembly.Location).ProductVersion ?? "N/A";
             properties.Add("version", ver);
-            
-            var hostName = System.Net.Dns.GetHostName();
-            var ips = await System.Net.Dns.GetHostAddressesAsync(hostName);
-            var ipa = ips.First().MapToIPv4().ToString() ?? "N/A";
-            properties.Add("ip-address", ipa);
-            
+
             return properties;
         }
+
+        
 
         [HttpPost]
         public async Task<IActionResult> PlaceBid([FromBody] Bid newBid)
@@ -84,7 +69,7 @@ namespace BidService.Controllers
                 _logger.LogInformation("Item {ItemId} is auctionable. Proceeding with bid.", newBid.ItemId);
 
                 // Publish bid to RabbitMQ
-                var published = await _rabbitMQPublisher.PublishToRabbitMQ(newBid);
+                var published = _rabbitMQPublisher.PublishBidToQueue(newBid);
                 if (!published)
 
                 _logger.LogInformation("Bid for {ItemId} published successfully to RabbitMQ.", newBid.ItemId);
