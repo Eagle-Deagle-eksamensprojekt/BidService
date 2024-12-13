@@ -5,6 +5,13 @@ using RabbitMQ.Client;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Disable HTTPS Redirection Middleware
+builder.Services.Configure<Microsoft.AspNetCore.HttpsPolicy.HttpsRedirectionOptions>(options =>
+{
+    options.HttpsPort = null; // Remove the HTTPS port
+});
+
+
 // NLog setup
 var logger = NLog.LogManager.Setup().LoadConfigurationFromAppSettings()
         .GetCurrentClassLogger();
