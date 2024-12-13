@@ -16,11 +16,10 @@ builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 builder.Services.AddMemoryCache();
 
-// Registrér RabbitMQListener både som en singleton og hosted service
-builder.Services.AddSingleton<RabbitMQListener>();
-builder.Services.AddHostedService(sp => sp.GetRequiredService<RabbitMQListener>());
+// Registrer RabbitMQListener som singleton, så den kan injiceres i controlleren
+builder.Services.AddSingleton<QueueNameProvider>();
+builder.Services.AddSingleton<RabbitMQListener>(); // <-- Registrér som singleton
 builder.Services.AddSingleton<RabbitMQPublisher>();
-
 
 // NLog and HttpClient
 builder.Logging.ClearProviders();

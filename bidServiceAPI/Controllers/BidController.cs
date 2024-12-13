@@ -48,15 +48,24 @@ namespace BidService.Controllers
         [HttpPost]
         public async Task<IActionResult> PlaceBid([FromBody] Bid newBid)
         {
-            _logger.LogInformation("Placing bid on item {ItemId} for {Amount:C}.", newBid.ItemId, newBid.Amount);
+            // Her får vi itemId fra headeren, som blev sendt af Nginx
+            var itemId = Request.Headers["X-Item-ID"].ToString();
+
+            _logger.LogInformation("Placing bid on item {ItemId} for {Amount:C}.", itemId, newBid.Amount);
 
             try
             {
                 // Tjek om item er auctionable
-                var auctionDetails = await IsItemAuctionable(newBid.ItemId);
+                var auctionDetails = await IsItemAuctionable(itemId);
+                if (itemId != newBid.ItemId)
+                {
+                    _logger.LogWarning("ItemId {ItemId} does not match bid ItemId {BidItemId}. Cannot place bid.", itemId, newBid.ItemId);
+                    return BadRequest("ItemId does not match bid ItemId.");
+                }
+        
                 if (auctionDetails == null)
                 {
-                    _logger.LogWarning("Item {ItemId} does not exist or is not auctionable.", newBid.ItemId);
+                    _logger.LogWarning("Item {ItemId} does not exist or is not auctionable.", itemId);
                     return BadRequest("Item is not auctionable or does not exist.");
                 }
 
@@ -64,20 +73,22 @@ namespace BidService.Controllers
                 if (now < auctionDetails.StartAuctionDateTime || now > auctionDetails.EndAuctionDateTime)
                 {
                     _logger.LogWarning("Item {ItemId} is not auctionable at {CurrentTime}. Auction is valid from {Start} to {End}.", 
-                        newBid.ItemId, now, auctionDetails.StartAuctionDateTime, auctionDetails.EndAuctionDateTime);
+                        itemId, now, auctionDetails.StartAuctionDateTime, auctionDetails.EndAuctionDateTime);
                     return BadRequest($"Item is not auctionable. Valid auction period: {auctionDetails.StartAuctionDateTime} to {auctionDetails.EndAuctionDateTime}");
                 }
 
-                _logger.LogInformation("Item {ItemId} is auctionable. Proceeding with bid.", newBid.ItemId);
+                _logger.LogInformation("Item {ItemId} is auctionable. Proceeding with bid.", itemId);
 
                 // Publish bid to RabbitMQ
                 var published = _rabbitMQPublisher.PublishBidToQueue(newBid);
                 if (!published)
+                {
+                    _logger.LogError("Failed to publish bid to RabbitMQ.");
+                    return StatusCode(500, "Failed to publish bid to RabbitMQ.");
+                }
 
-                _logger.LogInformation("Bid for {ItemId} published successfully to RabbitMQ.", newBid.ItemId);
                 return Ok(newBid); // Returner det nye bud
             }
-            
             catch (Exception ex)
             {
                 _logger.LogError(ex, "An error occurred while placing bid for item {ItemId}.", newBid.ItemId);
@@ -203,8 +214,7 @@ namespace BidService.Controllers
         public async Task<IActionResult> StartListener()
         {
             // Trigger ScheduleAuctions method manually
-            var cancellationToken = new CancellationToken(); // you can pass a valid token if needed
-            _rabbitMQListener.StartAuction(cancellationToken);
+            _rabbitMQListener.StartAuction();
             return Ok("BidService listener started.");
         }
 

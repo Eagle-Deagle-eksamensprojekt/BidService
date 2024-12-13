@@ -8,10 +8,12 @@ public class RabbitMQPublisher
     private readonly ILogger<RabbitMQPublisher> _logger;
     private readonly IConnection _connection;
     private readonly IModel _channel;
+    private readonly QueueNameProvider _queueNameProvider;
 
-    public RabbitMQPublisher(ILogger<RabbitMQPublisher> logger, IConfiguration config)
+    public RabbitMQPublisher(ILogger<RabbitMQPublisher> logger, IConfiguration config, QueueNameProvider queueNameProvider)
     {
         _logger = logger;
+        _queueNameProvider = queueNameProvider;
 
         var rabbitHost = config["RABBITMQ_HOST"] ?? "localhost";
         var factory = new ConnectionFactory() { HostName = rabbitHost };
@@ -30,7 +32,18 @@ public class RabbitMQPublisher
                 return false;
             }
 
-            var queueName = $"{bid.ItemId}Queue";
+            var queueName = _queueNameProvider.GetActiveQueueName();
+            if (string.IsNullOrEmpty(queueName))
+            {
+                _logger.LogError("No active queue name is set. Cannot publish bid.");
+                return false;
+            }
+
+            if (queueName != bid.ItemId + "Queue") // Denne skal blokere at der bliver publishet til en forkert kø
+            {
+                _logger.LogError("ItemId {ItemId} does not match Queue name {QueueName}. Cannot publish bid.", bid.ItemId, queueName);
+                return false;
+            }
 
             // Declare the queue if it doesn't exist
             _channel.QueueDeclare(
@@ -53,7 +66,7 @@ public class RabbitMQPublisher
                 body: body
             );
 
-            _logger.LogInformation("Published bid with amount {Amount} for {BidId} to queue {QueueName}.",bid.Amount, bid.ItemId, queueName);
+            _logger.LogInformation("Published bid with amount {Amount} for {BidId} to queue {QueueName}.", bid.Amount, bid.ItemId, queueName);
             return true;
         }
         catch (Exception ex)
@@ -62,6 +75,7 @@ public class RabbitMQPublisher
             return false;
         }
     }
+
 
     public void Dispose()
     {

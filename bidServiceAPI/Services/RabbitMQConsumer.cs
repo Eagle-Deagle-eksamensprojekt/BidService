@@ -10,12 +10,14 @@ public class RabbitMQListener : BackgroundService
     private readonly IConnection _connection;
     private readonly IModel _channel;
     private readonly IConfiguration _config;
+    private readonly QueueNameProvider _queueNameProvider; // For at dele kønavnet
     private string? _activeItemId;
 
-    public RabbitMQListener(ILogger<RabbitMQListener> logger, IConfiguration config)
+    public RabbitMQListener(ILogger<RabbitMQListener> logger, IConfiguration config, QueueNameProvider queueNameProvider)
     {
         _logger = logger;
         _config = config;
+        _queueNameProvider = queueNameProvider;
 
         var rabbitHost = config["RABBITMQ_HOST"] ?? "localhost";
         var factory = new ConnectionFactory { HostName = rabbitHost };
@@ -34,7 +36,7 @@ public class RabbitMQListener : BackgroundService
             if (now.Hour == 7 && now.Minute == 0 && _activeItemId == null)
             {
                 _logger.LogInformation("Starting auction for the day...");
-                StartAuction(stoppingToken);
+                StartAuction();
             }
 
             // Stop auction logic at 18:00
@@ -48,12 +50,12 @@ public class RabbitMQListener : BackgroundService
         }
     }
 
-    public void StartAuction(CancellationToken stoppingToken)
+    public void StartAuction()
     {
         var queueName = _config["TodaysAuctionsRabbitQueue"] ?? "TodaysAuctions";
 
         // Fetch a single message
-        var result = _channel.BasicGet(queueName, autoAck: true); // BasicGet sikre at vi kun henter en besked fra køen
+        var result = _channel.BasicGet(queueName, autoAck: true);
         if (result == null)
         {
             _logger.LogWarning("No auctions available in the queue.");
@@ -82,6 +84,9 @@ public class RabbitMQListener : BackgroundService
             arguments: null
         );
 
+        // Gem kønavnet i QueueNameProvider
+        _queueNameProvider.SetActiveQueueName(bidQueueName);
+
         _logger.LogInformation("Bid queue {QueueName} declared for ItemId {ItemId}.", bidQueueName, _activeItemId);
     }
 
@@ -96,8 +101,14 @@ public class RabbitMQListener : BackgroundService
         var bidQueueName = $"{_activeItemId}Queue";
         _logger.LogInformation("Stopping auction for ItemId {ItemId}. Deleting queue {QueueName}.", _activeItemId, bidQueueName);
 
+        // Slet køen, hvis det ønskes
         _channel.QueueDelete(bidQueueName);
+
+        // Nulstil aktiv auktion
         _activeItemId = null;
+
+        // Ryd kønavn i QueueNameProvider
+        _queueNameProvider.SetActiveQueueName(null);
     }
 
     public override void Dispose()
