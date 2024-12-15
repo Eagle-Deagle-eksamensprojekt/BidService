@@ -54,14 +54,23 @@ public class RabbitMQListener : BackgroundService
     {
         var queueName = _config["TodaysAuctionsRabbitQueue"] ?? "TodaysAuctions";
 
+        // Ensure the queue exists
+        _channel.QueueDeclare(
+            queue: queueName,
+            durable: false,
+            exclusive: false,
+            autoDelete: false,
+            arguments: null
+        );
+
         // Fetch a single message
-        var result = _channel.BasicGet(queueName, autoAck: true); //basicGet henter 1 besked fra køen
+        var result = _channel.BasicGet(queueName, autoAck: true); // Henter én besked fra køen
         if (result == null)
         {
             _logger.LogWarning("No auctions available in the queue.");
             return;
         }
-
+                                                                        
         var message = Encoding.UTF8.GetString(result.Body.ToArray());
         var auction = JsonSerializer.Deserialize<Auction>(message);
 
@@ -70,15 +79,6 @@ public class RabbitMQListener : BackgroundService
             _logger.LogError("Failed to deserialize auction message.");
             return;
         }
-
-        // Declare queue for today's auctions if it doesn't exist
-        _channel.QueueDeclare(
-            queue: "TodaysAuctions",
-            durable: false,
-            exclusive: false,
-            autoDelete: false,
-            arguments: null
-        );
 
         _activeItemId = auction.Id;
         _logger.LogInformation("Auction started for ItemId {ItemId}.", _activeItemId);
@@ -97,7 +97,8 @@ public class RabbitMQListener : BackgroundService
         _queueNameProvider.SetActiveQueueName(bidQueueName);
 
         _logger.LogInformation("Bid queue {QueueName} declared for ItemId {ItemId}.", bidQueueName, _activeItemId);
-    }
+    }   
+
 
     private void StopAuction()
     {

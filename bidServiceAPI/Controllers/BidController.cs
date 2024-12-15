@@ -218,6 +218,15 @@ namespace BidService.Controllers
             return Ok("BidService listener started.");
         }
 
+
+        [HttpPost("StartAuction")]
+        public async Task<IActionResult> StartAuction()
+        {
+            // Trigger StartAuction method manually
+            _rabbitMQListener.StartAuction();
+            return Ok("Auction started");
+        }
+
     }
 
     internal class AuctionDetails
