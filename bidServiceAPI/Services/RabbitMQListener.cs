@@ -12,12 +12,14 @@ public class RabbitMQListener : BackgroundService
     private readonly IConfiguration _config;
     private readonly QueueNameProvider _queueNameProvider; // For at dele kønavnet
     private string? _activeItemId;
+    private readonly BidProcessingService _bidProcessingService;
 
-    public RabbitMQListener(ILogger<RabbitMQListener> logger, IConfiguration config, QueueNameProvider queueNameProvider)
+    public RabbitMQListener(ILogger<RabbitMQListener> logger, IConfiguration config, QueueNameProvider queueNameProvider, BidProcessingService bidProcessingService)
     {
         _logger = logger;
         _config = config;
         _queueNameProvider = queueNameProvider;
+        _bidProcessingService = bidProcessingService;
 
         var rabbitHost = config["RABBITMQ_HOST"] ?? "localhost";
         var factory = new ConnectionFactory { HostName = rabbitHost };
@@ -84,7 +86,7 @@ public class RabbitMQListener : BackgroundService
         _activeItemId = auctionMessage.ItemId;
         _logger.LogInformation("Auction started for ItemId {ItemId}.", _activeItemId);
 
-        // Declare queue for bids
+        // Declare queue for bids to auctionService
         var bidQueueName = $"{_activeItemId}Queue";
         _channel.QueueDeclare(
             queue: bidQueueName,
@@ -98,6 +100,10 @@ public class RabbitMQListener : BackgroundService
         _queueNameProvider.SetActiveQueueName(bidQueueName);
         var bidItemID = _activeItemId;
         _queueNameProvider.SetActiveItemId(bidItemID);
+
+        //Opret kø for bid ingress
+        StartQueueForBidIngress();
+        _bidProcessingService.StartListenerBidIngress(); // Start listener for bid ingress
 
         _logger.LogInformation("Bid queue {QueueName} declared for ItemId {ItemId}.", bidQueueName, _activeItemId);
     }
@@ -123,6 +129,22 @@ public class RabbitMQListener : BackgroundService
 
         // Ryd kønavn i QueueNameProvider
         _queueNameProvider.SetActiveQueueName(null!);
+    }
+
+    // Declare queue for bids incomming from ingress
+    public void StartQueueForBidIngress()
+    {
+        var queueName = $"{_activeItemId}bid";
+
+        _channel.QueueDeclare(
+            queue: queueName,
+            durable: false,
+            exclusive: false,
+            autoDelete: false,
+            arguments: null
+        );
+
+        _logger.LogInformation("Bid queue {QueueName} created for ItemId {ItemId}.", queueName, _activeItemId);
     }
 
     public override void Dispose()

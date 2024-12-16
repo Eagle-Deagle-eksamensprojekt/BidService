@@ -18,7 +18,14 @@ namespace BidService.Controllers
         private readonly RabbitMQPublisher _rabbitMQPublisher; 
         private readonly IMemoryCache _memoryCache;
         private readonly RabbitMQListener _rabbitMQListener;
-        public BidController(ILogger<BidController> logger, IConfiguration config, IHttpClientFactory httpClientFactory, RabbitMQPublisher rabbitMQPublisher, IMemoryCache memoryCache, RabbitMQListener rabbitMQListener)
+        private readonly BidProcessingService _BidProcessingService;
+        public BidController(ILogger<BidController> logger, 
+        IConfiguration config, 
+        IHttpClientFactory httpClientFactory, 
+        RabbitMQPublisher rabbitMQPublisher, 
+        IMemoryCache memoryCache, 
+        RabbitMQListener rabbitMQListener,
+        BidProcessingService BidProcessingService)
         {
             _logger = logger;
             _config = config;
@@ -26,6 +33,7 @@ namespace BidService.Controllers
             _memoryCache = memoryCache;
             _rabbitMQPublisher = rabbitMQPublisher;
             _rabbitMQListener = rabbitMQListener;
+            _BidProcessingService = BidProcessingService;
         }
 
         /// <summary>
@@ -66,7 +74,7 @@ namespace BidService.Controllers
             try
             {
                 // Tjek om item er auctionable
-                var auctionDetails = await IsItemAuctionable(itemId!);
+                var auctionDetails = await _BidProcessingService.ValidateAuctionableItem(itemId!);
                 if (itemId != newBid.ItemId)
                 {
                     _logger.LogWarning("ItemId {ItemId} does not match bid ItemId {BidItemId}. Cannot place bid.", itemId, newBid.ItemId);
@@ -106,7 +114,7 @@ namespace BidService.Controllers
             }
         }
 
-
+/*
         private async Task<AuctionDetails?> IsItemAuctionable(string itemId)
         {
             // Check if the item's auction end time is in the cache
@@ -184,6 +192,7 @@ namespace BidService.Controllers
             _logger.LogWarning("Failed to determine if item {ItemId} is auctionable. Response status code: {StatusCode}.", itemId, response.StatusCode);
             return null; // Default to not auctionable if status is unknown
         }
+*/
 
 
         // Method to cache the auction end time
@@ -205,7 +214,7 @@ namespace BidService.Controllers
         [HttpGet("auctionable/{itemId}")]
         public async Task<IActionResult> GetAuctionableItem(string itemId)
         {
-            var item = await IsItemAuctionable(itemId);
+            var item = await _BidProcessingService.ValidateAuctionableItem(itemId!);
             if (item == null)
             {
                 return Ok(null); // Returnerer null, hvis ingen items findes
@@ -237,12 +246,5 @@ namespace BidService.Controllers
             return Ok("Auction started");
         }
     */
-    }
-    
-
-    internal class AuctionDetails
-    {
-        public DateTimeOffset StartAuctionDateTime { get; set; }
-        public DateTimeOffset EndAuctionDateTime { get; set; }
     }
 }

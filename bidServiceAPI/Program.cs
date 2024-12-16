@@ -28,6 +28,11 @@ builder.Services.AddSingleton<QueueNameProvider>();
 builder.Services.AddSingleton<RabbitMQListener>(); // <-- Registrér som singleton
 builder.Services.AddSingleton<RabbitMQPublisher>();
 
+// Registrer BidProcessingService som Singleton i stedet for HostedService
+builder.Services.AddSingleton<BidProcessingService>();
+
+
+
 // NLog and HttpClient
 builder.Logging.ClearProviders();
 builder.Host.UseNLog();
