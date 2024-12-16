@@ -12,6 +12,7 @@ public class RabbitMQListener : BackgroundService
     private readonly IConfiguration _config;
     private readonly QueueNameProvider _queueNameProvider; // For at dele kønavnet
     private string? _activeItemId;
+    private string? _activeItemEndDate;
     private readonly BidProcessingService _bidProcessingService;
 
     public RabbitMQListener(ILogger<RabbitMQListener> logger, IConfiguration config, QueueNameProvider queueNameProvider, BidProcessingService bidProcessingService)
@@ -84,6 +85,7 @@ public class RabbitMQListener : BackgroundService
         }
 
         _activeItemId = auctionMessage.ItemId;
+        _activeItemEndDate = auctionMessage.EndAuctionDateTime.ToString();
         _logger.LogInformation("Auction started for ItemId {ItemId}.", _activeItemId);
 
         // Declare queue for bids to auctionService

@@ -104,6 +104,7 @@ public class BidProcessingService : BackgroundService
         }
     }
 
+    // Start listener for bid ingress
     public void StartListenerBidIngress()
     {
         if (_consumer != null)
@@ -117,7 +118,7 @@ public class BidProcessingService : BackgroundService
         _logger.LogInformation("Listener started.");
     }
 
-    public async Task<AuctionDetails?> ValidateAuctionableItem(string itemId)
+    public async Task<TodaysAuctionMessage?> ValidateAuctionableItem(string itemId)
     {
         // Check cache
         if (_memoryCache.TryGetValue(itemId, out DateTimeOffset cachedEndTime))
@@ -126,7 +127,7 @@ public class BidProcessingService : BackgroundService
             if (currentTime <= cachedEndTime)
             {
                 _logger.LogInformation("Item {ItemId} found in cache. Auction is valid until {AuctionEndTime}.", itemId, cachedEndTime);
-                return new AuctionDetails
+                return new TodaysAuctionMessage
                 {
                     StartAuctionDateTime = currentTime,
                     EndAuctionDateTime = cachedEndTime
@@ -161,7 +162,7 @@ public class BidProcessingService : BackgroundService
             // Cache auction end time
             CacheAuctionEndTime(itemId, item.EndAuctionDateTime);
 
-            return new AuctionDetails
+            return new TodaysAuctionMessage
             {
                 StartAuctionDateTime = item.StartAuctionDateTime,
                 EndAuctionDateTime = item.EndAuctionDateTime
@@ -203,10 +204,10 @@ public class BidProcessingService : BackgroundService
         _connection?.Close();
         base.Dispose();
     }
-
+/*
     public class AuctionDetails
     {
         public DateTimeOffset StartAuctionDateTime { get; set; }
         public DateTimeOffset EndAuctionDateTime { get; set; }
-    }
+    }*/
 }
