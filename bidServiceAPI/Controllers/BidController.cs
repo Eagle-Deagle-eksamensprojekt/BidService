@@ -49,14 +49,24 @@ namespace BidService.Controllers
         public async Task<IActionResult> PlaceBid([FromBody] Bid newBid)
         {
             // Her får vi itemId fra headeren, som blev sendt af Nginx
-            var itemId = Request.Headers["X-Item-ID"].ToString();
+            //var itemId = Request.Headers["X-Item-ID"].ToString() ?? newBid.ItemId;
+            //var itemId = newBid.ItemId;
+            string itemId;
+            if (Request.Headers["X-Item-ID"].ToString() == "") // if for at tjekke om der er et itemid i headeren fra nginx // ved ikke om det header halløj virker
+            { 
+                _logger.LogInformation("No item ID found in header. Using item ID from bid.");
+                itemId = newBid.ItemId!;
+            } else {
+                _logger.LogInformation("Item ID found in header. Using item ID from header.");
+                itemId = Request.Headers["X-Item-ID"].ToString();
+            }
 
             _logger.LogInformation("Placing bid on item {ItemId} for {Amount:C}.", itemId, newBid.Amount);
 
             try
             {
                 // Tjek om item er auctionable
-                var auctionDetails = await IsItemAuctionable(itemId);
+                var auctionDetails = await IsItemAuctionable(itemId!);
                 if (itemId != newBid.ItemId)
                 {
                     _logger.LogWarning("ItemId {ItemId} does not match bid ItemId {BidItemId}. Cannot place bid.", itemId, newBid.ItemId);
@@ -218,7 +228,7 @@ namespace BidService.Controllers
             return Ok("BidService listener started.");
         }
 
-
+    /*
         [HttpPost("StartAuction")]
         public async Task<IActionResult> StartAuction()
         {
@@ -226,8 +236,9 @@ namespace BidService.Controllers
             _rabbitMQListener.StartAuction();
             return Ok("Auction started");
         }
-
+    */
     }
+    
 
     internal class AuctionDetails
     {

@@ -70,17 +70,18 @@ public class RabbitMQListener : BackgroundService
             _logger.LogWarning("No auctions available in the queue.");
             return;
         }
-                                                                        
-        var message = Encoding.UTF8.GetString(result.Body.ToArray());
-        var auction = JsonSerializer.Deserialize<Auction>(message);
 
-        if (auction == null)
+        // Deserialiser beskeden som AuctionMessage
+        var message = Encoding.UTF8.GetString(result.Body.ToArray());
+        var auctionMessage = JsonSerializer.Deserialize<TodaysAuctionMessage>(message);
+
+        if (auctionMessage == null || string.IsNullOrWhiteSpace(auctionMessage.ItemId))
         {
-            _logger.LogError("Failed to deserialize auction message.");
+            _logger.LogError("Failed to deserialize auction message or ItemId is missing.");
             return;
         }
 
-        _activeItemId = auction.Id;
+        _activeItemId = auctionMessage.ItemId;
         _logger.LogInformation("Auction started for ItemId {ItemId}.", _activeItemId);
 
         // Declare queue for bids
@@ -93,11 +94,14 @@ public class RabbitMQListener : BackgroundService
             arguments: null
         );
 
-        // Gem kønavnet i QueueNameProvider
+        // Gem kønavnet og itemId i QueueNameProvider
         _queueNameProvider.SetActiveQueueName(bidQueueName);
+        var bidItemID = _activeItemId;
+        _queueNameProvider.SetActiveItemId(bidItemID);
 
         _logger.LogInformation("Bid queue {QueueName} declared for ItemId {ItemId}.", bidQueueName, _activeItemId);
-    }   
+    }
+ 
 
 
     private void StopAuction()
@@ -118,7 +122,7 @@ public class RabbitMQListener : BackgroundService
         _activeItemId = null;
 
         // Ryd kønavn i QueueNameProvider
-        _queueNameProvider.SetActiveQueueName(null);
+        _queueNameProvider.SetActiveQueueName(null!);
     }
 
     public override void Dispose()

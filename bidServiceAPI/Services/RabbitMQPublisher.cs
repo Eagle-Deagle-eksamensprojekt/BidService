@@ -33,17 +33,20 @@ public class RabbitMQPublisher
             }
 
             var queueName = _queueNameProvider.GetActiveQueueName();
+            //var queueItemId = _queueNameProvider.GetActiveItemId();
             if (string.IsNullOrEmpty(queueName))
             {
                 _logger.LogError("No active queue name is set. Cannot publish bid.");
                 return false;
             }
 
+            _logger.LogInformation("QueueName: {QueueName} Bid ItemId: {bid.ItemId}+Queue", queueName, bid.ItemId);
             if (queueName != bid.ItemId + "Queue") // Denne skal blokere at der bliver publishet til en forkert kø
             {
                 _logger.LogError("ItemId {ItemId} does not match Queue name {QueueName}. Cannot publish bid.", bid.ItemId, queueName);
                 return false;
             }
+
 
             // Declare the queue if it doesn't exist
             _channel.QueueDeclare(
