@@ -40,7 +40,7 @@ namespace BidService.Controllers
         /// Hent version af Service
         /// </summary>
         [HttpGet("version")]
-        public async Task<Dictionary<string,string>> GetVersion()
+        public async Task<IActionResult> GetVersion()
         {
             var properties = new Dictionary<string, string>();
 
@@ -48,11 +48,11 @@ namespace BidService.Controllers
                 typeof(Program).Assembly.Location).ProductVersion ?? "N/A";
             properties.Add("version", ver);
 
-            return properties;
+            return Ok(new {properties});
         }
 
 
-
+        // POST: bidServiceAPI/Bid/PlaceBid
         [HttpPost]
         public async Task<IActionResult> PlaceBid([FromBody] Bid newBid)
         {
@@ -114,87 +114,6 @@ namespace BidService.Controllers
             }
         }
 
-/*
-        private async Task<AuctionDetails?> IsItemAuctionable(string itemId)
-        {
-            // Check if the item's auction end time is in the cache
-            if (_memoryCache.TryGetValue(itemId, out DateTimeOffset cachedAuctionEndTime))
-            {
-                var currentTime = DateTimeOffset.UtcNow;
-                if (currentTime <= cachedAuctionEndTime)
-                {
-                    _logger.LogInformation("Item {ItemId} found in cache. Auction is valid until {AuctionEndTime}.", itemId, cachedAuctionEndTime);
-                    return new AuctionDetails
-                    {
-                        StartAuctionDateTime = currentTime, // Dummy, as it's not cached
-                        EndAuctionDateTime = cachedAuctionEndTime
-                    };
-                }
-
-                // Remove expired cache
-                _memoryCache.Remove(itemId);
-                _logger.LogInformation("Item {ItemId} auction has expired. Removed from cache.", itemId);
-                return null;
-            }
-
-            // Construct the request URL to check auctionable status
-            var existsUrl = $"{_config["AuctionServiceEndpoint"]}/auctionable/{itemId}";
-            _logger.LogInformation("Checking if item is auctionable at: {ExistsUrl}", existsUrl);
-
-            var client = _httpClientFactory.CreateClient();
-            HttpResponseMessage response;
-
-            try
-            {
-                client.DefaultRequestHeaders.Add("Accept", "application/json");
-                response = await client.GetAsync(existsUrl);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error while checking if item is auctionable.");
-                return null; // Assume item is not auctionable on error
-            }
-
-            if (response.IsSuccessStatusCode)
-            {
-                // Deserialize the response into an `Item` object
-                string responseContent = await response.Content.ReadAsStringAsync();
-                var item = JsonSerializer.Deserialize<Item>(responseContent);
-
-                if (item == null)
-                {
-                    _logger.LogWarning("Failed to deserialize item {ItemId} auctionable status.", itemId);
-                    return null;
-                }
-
-                var now = DateTimeOffset.UtcNow;
-
-                // Check if the current time is within the auction period
-                if (now >= item.StartAuctionDateTime && now <= item.EndAuctionDateTime)
-                {
-                    _logger.LogInformation("Item {ItemId} is auctionable between {StartDate} and {EndDate}.", 
-                        itemId, item.StartAuctionDateTime, item.EndAuctionDateTime);
-
-                    // Cache the auction end time with an expiration
-                    CacheAuctionEndTime(itemId, item.EndAuctionDateTime);
-                    return new AuctionDetails
-                    {
-                        StartAuctionDateTime = item.StartAuctionDateTime,
-                        EndAuctionDateTime = item.EndAuctionDateTime
-                    };
-                }
-
-                _logger.LogInformation("Item {ItemId} is not auctionable. Current time: {CurrentTime}, StartDate: {StartDate}, EndDate: {EndDate}.",
-                    itemId, now, item.StartAuctionDateTime, item.EndAuctionDateTime);
-                return null;
-            }
-
-            _logger.LogWarning("Failed to determine if item {ItemId} is auctionable. Response status code: {StatusCode}.", itemId, response.StatusCode);
-            return null; // Default to not auctionable if status is unknown
-        }
-*/
-
-
         // Method to cache the auction end time
         private void CacheAuctionEndTime(string itemId, DateTimeOffset endAuctionTime)
         {
@@ -223,28 +142,23 @@ namespace BidService.Controllers
             return Ok(item); // Returnerer 200 OK med items
         }
 
-
-        // Her skal der implementeres en metode til at poste et bud til rabbitMQ
-        // I metoden skal ovenstående metode kaldes for at tjekke om item er auctionable
-        // Dertil skal der også valideres om det nye bud er højere end det nuværende højeste bud
-
-
+        // Start listener for at lytte på beskeder fra RabbitMQ og returnerer ItemId
         [HttpPost("start-listener")]
         public async Task<IActionResult> StartListener()
         {
-            // Trigger ScheduleAuctions method manually
-            _rabbitMQListener.StartAuction();
-            return Ok(new { message = "BidService listener started." }); // Return JSON        
-        }
-
-    /*
-        [HttpPost("StartAuction")]
-        public async Task<IActionResult> StartAuction()
-        {
             // Trigger StartAuction method manually
             _rabbitMQListener.StartAuction();
-            return Ok("Auction started");
+
+            // Fetch the active ItemId
+            var activeItemId = _rabbitMQListener.GetActiveItemId();
+
+            // Return JSON with ItemId
+            return Ok(new
+            {
+                message = "BidService listener started. You can now bid on ItemId.",
+                ItemId = activeItemId
+            });
         }
-    */
+
     }
 }

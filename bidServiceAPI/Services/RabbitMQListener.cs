@@ -110,6 +110,12 @@ public class RabbitMQListener : BackgroundService
         _logger.LogInformation("Bid queue {QueueName} declared for ItemId {ItemId}.", bidQueueName, _activeItemId);
     }
  
+    // Gemmer aktivt ItemId så det kan hentes i controller
+    public string GetActiveItemId()
+    {
+        return _activeItemId ?? "No active ItemId";
+    }
+
 
 
     private void StopAuction()
