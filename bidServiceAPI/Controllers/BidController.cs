@@ -234,7 +234,7 @@ namespace BidService.Controllers
         {
             // Trigger ScheduleAuctions method manually
             _rabbitMQListener.StartAuction();
-            return Ok("BidService listener started.");
+            return Ok(new { message = "BidService listener started." }); // Return JSON        
         }
 
     /*
