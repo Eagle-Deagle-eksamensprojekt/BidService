@@ -3,6 +3,7 @@ using BidServiceAPI.Models;
 using System.Text.Json;
 using System.Diagnostics;
 using Microsoft.Extensions.Caching.Memory;
+using Microsoft.AspNetCore.Authorization;
 
 
 
@@ -39,6 +40,7 @@ namespace BidService.Controllers
         /// <summary>
         /// Hent version af Service
         /// </summary>
+        [Authorize]
         [HttpGet("version")]
         public async Task<IActionResult> GetVersion()
         {
@@ -53,21 +55,13 @@ namespace BidService.Controllers
 
 
         // POST: bidServiceAPI/Bid/PlaceBid
+        [Authorize]
         [HttpPost]
         public async Task<IActionResult> PlaceBid([FromBody] Bid newBid)
         {
-            // Her får vi itemId fra headeren, som blev sendt af Nginx
-            //var itemId = Request.Headers["X-Item-ID"].ToString() ?? newBid.ItemId;
-            //var itemId = newBid.ItemId;
-            string itemId;
-            if (Request.Headers["X-Item-ID"].ToString() == "") // if for at tjekke om der er et itemid i headeren fra nginx // ved ikke om det header halløj virker
-            { 
-                _logger.LogInformation("No item ID found in header. Using item ID from bid.");
-                itemId = newBid.ItemId!;
-            } else {
-                _logger.LogInformation("Item ID found in header. Using item ID from header.");
-                itemId = Request.Headers["X-Item-ID"].ToString();
-            }
+
+            var itemId = newBid.ItemId!;
+
 
             _logger.LogInformation("Placing bid on item {ItemId} for {Amount:C}.", itemId, newBid.Amount);
 
@@ -88,6 +82,8 @@ namespace BidService.Controllers
                 }
 
                 var now = DateTimeOffset.UtcNow;
+                
+                // indsæt cache for at tjekke om item er auctionable så slipper vi for mange kald til auctionService
                 if (now < auctionDetails.StartAuctionDateTime || now > auctionDetails.EndAuctionDateTime)
                 {
                     _logger.LogWarning("Item {ItemId} is not auctionable at {CurrentTime}. Auction is valid from {Start} to {End}.", 
@@ -130,6 +126,7 @@ namespace BidService.Controllers
 
         // simpel get for at teste om den kan hente bool på auctionable item
         // tager både itemid og datetime som parameter
+        [Authorize]
         [HttpGet("auctionable/{itemId}")]
         public async Task<IActionResult> GetAuctionableItem(string itemId)
         {
@@ -143,6 +140,7 @@ namespace BidService.Controllers
         }
 
         // Start listener for at lytte på beskeder fra RabbitMQ og returnerer ItemId
+        [Authorize]
         [HttpPost("start-listener")]
         public async Task<IActionResult> StartListener()
         {
