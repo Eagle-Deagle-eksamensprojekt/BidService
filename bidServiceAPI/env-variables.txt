@@ -1,4 +1,0 @@
-export ASPNETCORE_ENVIRONMENT=Development
-export Loki=http://localhost:3100
-export AuctionServiceEndpoint=http://localhost:5256/auction
-export TodaysAuctionsRabbitQueue=TodaysAuctionsRabbitQueue

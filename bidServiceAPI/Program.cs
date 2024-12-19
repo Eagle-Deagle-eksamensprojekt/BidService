@@ -1,53 +1,86 @@
+using System.Text;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Builder;
+using Microsoft.IdentityModel.Tokens;
 using NLog;
 using NLog.Web;
 using RabbitMQ.Client;
+using VaultSharp;
+using VaultSharp.V1.AuthMethods.Token;
+
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Add services to the container.
-var logger = NLog.LogManager.Setup().LoadConfigurationFromAppSettings()
-        .GetCurrentClassLogger();
-        logger.Debug("init main"); // NLog setup
-
-builder.Services.AddControllers();
-// Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
-builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen();
-
-builder.Services.AddMemoryCache();
-
-builder.Services.AddSingleton<RabbitMQListener>(); // Register RabbitMQ listener as a singleton
-
-builder.Services.AddSingleton<IConnectionFactory>(sp =>
+// Disable HTTPS Redirection Middleware
+builder.Services.Configure<Microsoft.AspNetCore.HttpsPolicy.HttpsRedirectionOptions>(options =>
 {
-    var config = sp.GetRequiredService<IConfiguration>();
-    var rabbitHost = config["RABBITMQ_HOST"] ?? "localhost";
-
-    return new ConnectionFactory
-    {
-        HostName = rabbitHost,
-        DispatchConsumersAsync = true // Brug asynkron forbrug
-    };
+    options.HttpsPort = null; // Remove the HTTPS port
 });
 
 
-// Registrér at I ønsker at bruge NLOG som logger fremadrettet (før builder.build)
+// NLog setup
+var logger = NLog.LogManager.Setup().LoadConfigurationFromAppSettings()
+        .GetCurrentClassLogger();
+logger.Debug("init main");
+
+// Add services to the container
+builder.Services.AddControllers();
+builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddSwaggerGen();
+builder.Services.AddMemoryCache();
+
+// Registrer RabbitMQListener som singleton, så den kan injiceres i controlleren
+builder.Services.AddSingleton<QueueNameProvider>();
+builder.Services.AddSingleton<RabbitMQListener>(); // <-- Registrér som singleton
+builder.Services.AddSingleton<RabbitMQPublisher>();
+
+// Registrer BidProcessingService som Singleton i stedet for HostedService
+builder.Services.AddSingleton<BidProcessingService>();
+
+
+
+// NLog and HttpClient
 builder.Logging.ClearProviders();
 builder.Host.UseNLog();
-builder.Logging.AddConsole(); // Logger til konsollen, synlig med `docker logs`
+builder.Logging.AddConsole();
+builder.Services.AddHttpClient();
+
+// Vault-integration
+var vaultToken = Environment.GetEnvironmentVariable("VAULT_TOKEN") 
+                 ?? throw new Exception("Vault token not found");
+var vaultUrl = Environment.GetEnvironmentVariable("VAULT_URL") 
+               ?? "http://vault:8200"; // Standard Vault URL
+
+var authMethod = new TokenAuthMethodInfo(vaultToken);
+var vaultClientSettings = new VaultClientSettings(vaultUrl, authMethod);
+var vaultClient = new VaultClient(vaultClientSettings);
+
+var kv2Secret = await vaultClient.V1.Secrets.KeyValue.V2.ReadSecretAsync(path: "Secrets", mountPoint: "secret");
+var jwtSecret = kv2Secret.Data.Data["jwtSecret"]?.ToString() ?? throw new Exception("jwtSecret not found in Vault.");
+var jwtIssuer = kv2Secret.Data.Data["jwtIssuer"]?.ToString() ?? throw new Exception("jwtIssuer not found in Vault.");
 
 
-// Register HttpClientFactory
-builder.Services.AddHttpClient(); //tjek
+// Register JWT authentication
+builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+    .AddJwtBearer(options =>
+    {
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuer = true,
+            ValidateAudience = true,
+            ValidateLifetime = true,
+            ValidateIssuerSigningKey = true,
+            ValidIssuer = jwtIssuer,
+            ValidAudience = "http://localhost", // Tilpas efter behov
+            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSecret))
+        };
+    });
+
+builder.Services.AddAuthorization();
 
 var app = builder.Build();
 
-var rabbitListener = app.Services.GetRequiredService<RabbitMQListener>();
-
-await rabbitListener.ListenOnQueue();
-
-// Configure the HTTP request pipeline.
+// Configure the HTTP request pipeline
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
@@ -55,9 +88,7 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseHttpsRedirection();
-
+app.UseAuthentication(); // Auhorization
 app.UseAuthorization();
-
 app.MapControllers();
-
 app.Run();

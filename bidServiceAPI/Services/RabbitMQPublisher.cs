@@ -1,83 +1,89 @@
+
 using System.Text;
 using System.Text.Json;
 using RabbitMQ.Client;
-using RabbitMQ.Client.Events;
 using BidServiceAPI.Models;
 
-// Background service that listens for incoming bids on a RabbitMQ queue
-public class RabbitMQPublisher : BackgroundService
+public class RabbitMQPublisher
 {
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
-    {
-        // Implement the logic to run in the background service
-        while (!stoppingToken.IsCancellationRequested) 
-        {
-            await Task.Delay(1000, stoppingToken); // Example delay
-        }
-    }
-
     private readonly ILogger<RabbitMQPublisher> _logger;
     private readonly IConnection _connection;
     private readonly IModel _channel;
-    private readonly Dictionary<string, CancellationTokenSource> _activeListeners;
-    private readonly IConfiguration _config;
+    private readonly QueueNameProvider _queueNameProvider;
 
-    public RabbitMQPublisher(ILogger<RabbitMQPublisher> logger, IConfiguration config)
+    public RabbitMQPublisher(ILogger<RabbitMQPublisher> logger, IConfiguration config, QueueNameProvider queueNameProvider)
     {
         _logger = logger;
-        _config = config;
+        _queueNameProvider = queueNameProvider;
 
-        var rabbitHost = _config["RABBITMQ_HOST"] ?? "localhost";
+        var rabbitHost = config["RABBITMQ_HOST"] ?? "localhost";
         var factory = new ConnectionFactory() { HostName = rabbitHost };
 
         _connection = factory.CreateConnection();
         _channel = _connection.CreateModel();
     }
-    
 
-    public async Task<bool> PublishToRabbitMQ(Bid bid)
+    public bool PublishBidToQueue(Bid bid)
+    {
+        try
         {
-
-            try
+            if (bid == null || string.IsNullOrWhiteSpace(bid.ItemId))
             {
-                // Queue name based on AuctionId
-                var itemId = _config["ITEM_ID"];
-                if (itemId == null)
-                {
-                    _logger.LogError("Failed to get ItemId from bid.");
-                    return false;
-                }
-                var queueName = $"{itemId}Queue";
-
-                // Declare the queue (only necessary the first time)
-                _channel.QueueDeclare(
-                    queue: queueName,
-                    durable: false,
-                    exclusive: false,
-                    autoDelete: false,
-                    arguments: null
-                );
-
-                // Serialize bid object to JSON
-                var message = JsonSerializer.Serialize(bid);
-                var body = Encoding.UTF8.GetBytes(message);
-
-                // Publish the message to RabbitMQ
-                _channel.BasicPublish(
-                    exchange: "",
-                    routingKey: queueName,
-                    basicProperties: null,
-                    body: body
-                );
-
-                _logger.LogInformation("Published bid {BidId} to RabbitMQ queue {QueueName}.", bid.Id, queueName);
-                return true;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Failed to publish bid {BidId} to RabbitMQ.", bid.Id);
+                _logger.LogError("Invalid bid or missing ItemId.");
                 return false;
             }
-        }
-}
 
+            var queueName = _queueNameProvider.GetActiveQueueName();
+            //var queueItemId = _queueNameProvider.GetActiveItemId();
+            if (string.IsNullOrEmpty(queueName))
+            {
+                _logger.LogError("No active queue name is set. Cannot publish bid.");
+                return false;
+            }
+
+            _logger.LogInformation("QueueName: {QueueName} Bid ItemId: {bid.ItemId}+Queue", queueName, bid.ItemId);
+            if (queueName != bid.ItemId + "Queue") // Denne skal blokere at der bliver publishet til en forkert kø
+            {
+                _logger.LogError("ItemId {ItemId} does not match Queue name {QueueName}. Cannot publish bid.", bid.ItemId, queueName);
+                return false;
+            }
+
+
+            // Declare the queue if it doesn't exist
+            _channel.QueueDeclare(
+                queue: queueName,
+                durable: false,
+                exclusive: false,
+                autoDelete: false,
+                arguments: null
+            );
+
+            // Serialize bid to JSON
+            var message = JsonSerializer.Serialize(bid);
+            var body = Encoding.UTF8.GetBytes(message);
+
+            // Publish to the queue
+            _channel.BasicPublish(
+                exchange: "",
+                routingKey: queueName,
+                basicProperties: null,
+                body: body
+            );
+
+            _logger.LogInformation("Published bid with amount {Amount} for {BidId} to queue {QueueName}.", bid.Amount, bid.ItemId, queueName);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to publish bid.");
+            return false;
+        }
+    }
+
+
+    public void Dispose()
+    {
+        _channel?.Close();
+        _connection?.Close();
+    }
+}
