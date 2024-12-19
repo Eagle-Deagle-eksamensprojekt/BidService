@@ -60,7 +60,7 @@ namespace BidService.Controllers
         public async Task<IActionResult> PlaceBid([FromBody] Bid newBid)
         {
 
-            var itemId = newBid.ItemId!;
+            var itemId = newBid.ItemId!; // Hent ItemId fra det nye bud
 
 
             _logger.LogInformation("Placing bid on item {ItemId} for {Amount:C}.", itemId, newBid.Amount);
@@ -83,18 +83,20 @@ namespace BidService.Controllers
 
                 var now = DateTimeOffset.UtcNow;
                 
-                // indsæt cache for at tjekke om item er auctionable så slipper vi for mange kald til auctionService
+                // indsæt caching her
+                // for at tjekke om item er auctionable så slipper vi for mange kald til auctionService
+
                 if (now < auctionDetails.StartAuctionDateTime || now > auctionDetails.EndAuctionDateTime)
                 {
                     _logger.LogWarning("Item {ItemId} is not auctionable at {CurrentTime}. Auction is valid from {Start} to {End}.", 
-                        itemId, now, auctionDetails.StartAuctionDateTime, auctionDetails.EndAuctionDateTime);
+                        itemId, now, auctionDetails.StartAuctionDateTime, auctionDetails.EndAuctionDateTime); 
                     return BadRequest($"Item is not auctionable. Valid auction period: {auctionDetails.StartAuctionDateTime} to {auctionDetails.EndAuctionDateTime}");
                 }
 
                 _logger.LogInformation("Item {ItemId} is auctionable. Proceeding with bid.", itemId);
 
                 // Publish bid to RabbitMQ
-                var published = _rabbitMQPublisher.PublishBidToQueue(newBid);
+                var published = _rabbitMQPublisher.PublishBidToQueue(newBid); // Publish the bid to RabbitMQ
                 if (!published)
                 {
                     _logger.LogError("Failed to publish bid to RabbitMQ.");
@@ -111,6 +113,8 @@ namespace BidService.Controllers
         }
 
         // Method to cache the auction end time
+        // Gjort klar til caching af auction end time
+        // Cahce er bliver sat i BidProcessingService.cs
         private void CacheAuctionEndTime(string itemId, DateTimeOffset endAuctionTime)
         {
             var cacheExpiryOptions = new MemoryCacheEntryOptions

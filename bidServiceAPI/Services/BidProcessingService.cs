@@ -42,12 +42,12 @@ public class BidProcessingService : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        await StartListening(stoppingToken);
+        await StartListening(stoppingToken); // Start listening for bids
     }
 
     public async Task StartListening(CancellationToken stoppingToken)
     {
-        var queueName = _queueNameProvider.GetActiveItemId() + "bid";
+        var queueName = _queueNameProvider.GetActiveItemId() + "bid"; // Setting the queue name
 
         // Ensure the queue exists
         _channel.QueueDeclare(
@@ -60,34 +60,34 @@ public class BidProcessingService : BackgroundService
 
         _logger.LogInformation("Listening for bids on queue {QueueName}.", queueName);
 
-        _consumer = new EventingBasicConsumer(_channel);
+        _consumer = new EventingBasicConsumer(_channel); // Basic consumer for receiving 1 mesaage at a time
         _consumer.Received += async (model, ea) =>
         {
             try
             {
                 // Deserialize incoming bid
-                var body = ea.Body.ToArray();
-                var message = Encoding.UTF8.GetString(body);
-                var bid = JsonSerializer.Deserialize<Bid>(message);
+                var body = ea.Body.ToArray(); // Get the body of the message
+                var message = Encoding.UTF8.GetString(body); // Convert the body to a string
+                var bid = JsonSerializer.Deserialize<Bid>(message); // Deserialize the string to a Bid object
 
                 if (bid == null)
                 {
                     _logger.LogWarning("Received a null bid. Ignoring message.");
-                    return;
+                    return; // Ignore the message if the bid is null
                 }
 
                 _logger.LogInformation("Received bid for ItemId {ItemId}: {Amount}.", bid.ItemId, bid.Amount);
 
                 // Validate the bid
-                var isValid = await ValidateAuctionableItem(bid.ItemId!);
+                var isValid = await ValidateAuctionableItem(bid.ItemId!); // Validate the bid
                 if (isValid == null)
                 {
                     _logger.LogWarning("Bid for ItemId {ItemId} is not valid. Ignoring bid.", bid.ItemId);
-                    return;
+                    return; // Ignore the bid if it is not valid
                 }
 
                 // Forward valid bid to auctionService queue
-                PublishBidToAuctionService(bid);
+                PublishBidToAuctionService(bid); // Publish the bid to the auctionService queue
             }
             catch (Exception ex)
             {
@@ -95,12 +95,12 @@ public class BidProcessingService : BackgroundService
             }
         };
 
-        _channel.BasicConsume(queue: queueName, autoAck: true, consumer: _consumer);
+        _channel.BasicConsume(queue: queueName, autoAck: true, consumer: _consumer); // Start consuming messages
 
         // Keep the service alive
-        while (!stoppingToken.IsCancellationRequested)
+        while (!stoppingToken.IsCancellationRequested) // Keep the service alive
         {
-            await Task.Delay(1000, stoppingToken);
+            await Task.Delay(1000, stoppingToken); // Delay for 1 second
         }
     }
 
@@ -110,59 +110,59 @@ public class BidProcessingService : BackgroundService
         if (_consumer != null)
         {
             _logger.LogWarning("Listener is already running on queue: {itemId}bid.", _queueNameProvider.GetActiveItemId());
-            return;
+            return; // Listener is already running
         }
-
-        var cts = new CancellationTokenSource();
-        StartListening(cts.Token).ConfigureAwait(false);
-        _logger.LogInformation("Listener started.");
+ 
+        var cts = new CancellationTokenSource(); // Create a cancellation token source
+        StartListening(cts.Token).ConfigureAwait(false); // Start listening for bids
+        _logger.LogInformation("Listener started."); // Log that the listener has started
     }
 
     public async Task<TodaysAuctionMessage?> ValidateAuctionableItem(string itemId)
     {
         // Check cache
-        if (_memoryCache.TryGetValue(itemId, out DateTimeOffset cachedEndTime))
+        if (_memoryCache.TryGetValue(itemId, out DateTimeOffset cachedEndTime)) // Check if the item is in the cache
         {
-            var currentTime = DateTimeOffset.UtcNow;
-            if (currentTime <= cachedEndTime)
+            var currentTime = DateTimeOffset.UtcNow; // Get the current time
+            if (currentTime <= cachedEndTime) 
             {
                 _logger.LogInformation("Item {ItemId} found in cache. Auction is valid until {AuctionEndTime}.", itemId, cachedEndTime);
-                return new TodaysAuctionMessage
+                return new TodaysAuctionMessage // Return the auction details
                 {
                     StartAuctionDateTime = currentTime,
                     EndAuctionDateTime = cachedEndTime
                 };
             }
 
-            _memoryCache.Remove(itemId);
+            _memoryCache.Remove(itemId); // Remove the item from the cache
             _logger.LogInformation("Item {ItemId} auction has expired. Removed from cache.", itemId);
         }
 
         // Make HTTP call to AuctionService
-        var client = _httpClientFactory.CreateClient();
-        var url = $"{_config["AuctionServiceEndpoint"]}/auctionable/{itemId}";
+        var client = _httpClientFactory.CreateClient(); // Create a new HTTP client
+        var url = $"{_config["AuctionServiceEndpoint"]}/auctionable/{itemId}"; // Set the URL for the HTTP call
         _logger.LogInformation("Validating item {ItemId} against auctionService at {Url}.", itemId, url);
 
         try
         {
-            var response = await client.GetAsync(url);
-            if (!response.IsSuccessStatusCode)
+            var response = await client.GetAsync(url); // Make the HTTP call
+            if (!response.IsSuccessStatusCode) 
             {
                 _logger.LogWarning("Item {ItemId} is not auctionable. Response status code: {StatusCode}.", itemId, response.StatusCode);
                 return null;
             }
 
-            var item = JsonSerializer.Deserialize<Auction>(await response.Content.ReadAsStringAsync());
-            if (item == null || DateTimeOffset.UtcNow > item.EndAuctionDateTime)
+            var item = JsonSerializer.Deserialize<Auction>(await response.Content.ReadAsStringAsync()); // Deserialize the response
+            if (item == null || DateTimeOffset.UtcNow > item.EndAuctionDateTime) 
             {
                 _logger.LogInformation("Item {ItemId} is not auctionable or auction period has ended.", itemId);
                 return null;
             }
 
             // Cache auction end time
-            CacheAuctionEndTime(itemId, item.EndAuctionDateTime);
+            CacheAuctionEndTime(itemId, item.EndAuctionDateTime); // Cache the auction end time
 
-            return new TodaysAuctionMessage
+            return new TodaysAuctionMessage // Return the auction details
             {
                 StartAuctionDateTime = item.StartAuctionDateTime,
                 EndAuctionDateTime = item.EndAuctionDateTime
@@ -175,9 +175,9 @@ public class BidProcessingService : BackgroundService
         }
     }
 
-    private void CacheAuctionEndTime(string itemId, DateTimeOffset endAuctionTime)
+    private void CacheAuctionEndTime(string itemId, DateTimeOffset endAuctionTime) // Cache the auction end time
     {
-        _memoryCache.Set(itemId, endAuctionTime, new MemoryCacheEntryOptions
+        _memoryCache.Set(itemId, endAuctionTime, new MemoryCacheEntryOptions // Set the cache entry
         {
             AbsoluteExpiration = endAuctionTime,
             Priority = CacheItemPriority.High
@@ -185,9 +185,9 @@ public class BidProcessingService : BackgroundService
         _logger.LogInformation("Cached auction end time for item {ItemId}. Auction valid until {AuctionEndTime}.", itemId, endAuctionTime);
     }
 
-    private void PublishBidToAuctionService(Bid bid)
+    private void PublishBidToAuctionService(Bid bid) // Publish the bid to the auctionService queue
     {
-        var success = _rabbitMQPublisher.PublishBidToQueue(bid);
+        var success = _rabbitMQPublisher.PublishBidToQueue(bid); // Publish the bid to the auctionService queue
         if (success)
         {
             _logger.LogInformation("Published bid for ItemId {ItemId} to AuctionService queue.", bid.ItemId);
@@ -204,10 +204,4 @@ public class BidProcessingService : BackgroundService
         _connection?.Close();
         base.Dispose();
     }
-/*
-    public class AuctionDetails
-    {
-        public DateTimeOffset StartAuctionDateTime { get; set; }
-        public DateTimeOffset EndAuctionDateTime { get; set; }
-    }*/
 }

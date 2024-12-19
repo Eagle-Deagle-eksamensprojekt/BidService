@@ -21,25 +21,10 @@
       "description": "The ID of the user who owns this item (must reference a user with isSeller = true).",
       "pattern": "^[a-fA-F0-9]{24}$"
     },
-    "startAuctionDateTime": {
-      "type": "string",
-      "format": "date-time",
-      "description": "The start date and time for the auction of this item."
-    },
-    "endAuctionDateTime": {
-      "type": "string",
-      "format": "date-time",
-      "description": "The end date and time for the auction of this item."
-    },
     "createdDate": {
       "type": "string",
       "format": "date-time",
       "description": "The date and time when the item was created."
-    },
-    "startPrice": {
-      "type": "number",
-      "minimum": 0,
-      "description": "The starting price for the auction of this item."
     },
     "vurdertPrice": {
       "type": "number",
@@ -52,10 +37,7 @@
     "title",
     "description",
     "ownerId",
-    "startAuctionDateTime",
-    "endAuctionDateTime",
     "createdDate",
-    "startPrice",
     "vurdertPrice"
   ]
 }

@@ -6,36 +6,36 @@ public class QueueNameProvider
 
     public QueueNameProvider(ILogger<QueueNameProvider> logger)
     {
-        _logger = logger;
+        _logger = logger; // Set the logger
     }
 
     public void SetActiveQueueName(string queueName)
     {
         _logger.LogInformation("Setting active queue name to {QueueName}.", queueName);
-        _activeQueueName = queueName;
+        _activeQueueName = queueName; // Set the active queue name
     }
 
-    public string? GetActiveQueueName()
+    public string? GetActiveQueueName() 
     {
         if (string.IsNullOrEmpty(_activeQueueName))
         {
             _logger.LogWarning("No active queue name is set.");
         }
-        return _activeQueueName;
+        return _activeQueueName; // Return the active queue name
     }
     
-    public void SetActiveItemId(string itemId)
+    public void SetActiveItemId(string itemId) // Set the active item id
     {
         _logger.LogInformation("Setting active item id to {ItemId}.", itemId);
-        _activeItemId = itemId;
+        _activeItemId = itemId; // Set the active item id
     }
 
-    public string? GetActiveItemId()
+    public string? GetActiveItemId() // Get the active item id
     {
         if (string.IsNullOrEmpty(_activeItemId))
         {
             _logger.LogWarning("No active item id is set.");
         }
-        return _activeItemId;
+        return _activeItemId; // Return the active item id
     }
 }
